@@ -152,9 +152,9 @@ services:
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      # MYSQL_HOST: 127.0.0.1
-      # MYSQL_USER: ${MYSQL_USER}
-      # MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/v1/info"]

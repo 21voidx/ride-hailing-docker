@@ -280,7 +280,7 @@ with DAG(
     default_args=default_args,
     schedule=CronDataIntervalTimetable("30 22 * * *", timezone=SOURCE_TZ),
     start_date=pendulum.datetime(2026, 5, 1, tz=SOURCE_TZ),
-    catchup=False,
+    catchup=True,
     max_active_runs=1,
     tags=["postgres", "bigquery", "trino", "ingestion", "multi-table"],
     doc_md=__doc__,

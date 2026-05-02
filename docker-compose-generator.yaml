@@ -20,7 +20,7 @@ services:
       # 1 simulated minute = 0.5 real seconds.
       # Timestamp di database tetap maju menit/jam seperti ride nyata.
       SIM_SECONDS_PER_MINUTE: 0.5
-      SIM_START_DAYS_AGO: 30
+      SIM_START_DAYS_AGO: 3
 
       # Tracking ringan:
       TRACKING_INTERVAL_SIM_MINUTES: 10

@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import DAG, Param
+from airflow.sdk import DAG, Param, chain
 from airflow.timetables.interval import CronDataIntervalTimetable
 
 from helpers.refactored_trino_helper import TableConfig, make_table_task_group
@@ -37,8 +37,8 @@ GCP_CONN_ID = "google_cloud_default"
 TRINO_BQ_CAT = "bigquery"
 TRINO_PG_CAT = "postgresql"
 
-BQ_PROJECT = "change_me_project"
-BQ_DATASET = "change_me_dataset"
+BQ_PROJECT = "dbt-taxi-explore"
+BQ_DATASET = "dev_bronze_pg"
 BQ_LOCATION = "US"
 PG_SCHEMA = "public"
 
@@ -632,4 +632,4 @@ with DAG(
     # Default mode: all TaskGroups run in parallel.
     # Sequential mode, if needed:
     # from airflow.sdk import chain
-    # chain(*table_groups)
+    chain(*table_groups)

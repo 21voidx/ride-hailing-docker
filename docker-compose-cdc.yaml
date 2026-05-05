@@ -83,6 +83,7 @@ services:
         condition: service_healthy
     environment:
       # CONNECT_BOOTSTRAP_SERVERS: kafka:29092
+      CONNECT_LISTENERS: http://0.0.0.0:8083
       CONNECT_BOOTSTRAP_SERVERS: 127.0.0.1:9092
       CONNECT_REST_ADVERTISED_HOST_NAME: 127.0.0.1
       CONNECT_REST_PORT: 8083
@@ -135,6 +136,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
+    network_mode: host
     depends_on:
       kafka:
         condition: service_healthy
@@ -142,10 +144,14 @@ services:
         condition: service_healthy
     environment:
       KAFKA_CLUSTERS_0_NAME: cdc-cluster
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      # KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: cdc-connect
-      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://host.docker.internal:8083
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://host.docker.internal:8083
+      SERVER_PORT: 8085
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 127.0.0.1:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://127.0.0.1:8081
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://127.0.0.1:8083
       DYNAMIC_CONFIG_ENABLED: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"

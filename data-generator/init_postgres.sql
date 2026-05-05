@@ -1,5 +1,23 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Create a role for Debezium with appropriate permissions for logical decoding and replication.
+------------------------------------------------------------------
+CREATE ROLE debezium WITH LOGIN REPLICATION PASSWORD 'debezium';
+
+GRANT CONNECT ON DATABASE ride_ops_pg TO debezium;
+
+GRANT USAGE ON SCHEMA public TO debezium;
+
+GRANT SELECT ON TABLE
+  public.ride,
+  public.driver_profile,
+  public.payment_transaction
+TO debezium;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT ON TABLES TO debezium;
+------------------------------------------------------------------
+
 -- Drop in dependency order so repeated local resets are easy.
 DROP TABLE IF EXISTS promo_usage, review, payment_refund, payment_transaction, user_payment_method,
     payment_method_type, ride_fare_component, ride_fare, ride_tracking_point, ride_location,
@@ -320,3 +338,11 @@ VALUES
 ('CARD','Card',true, now(), now()),
 ('EWALLET','E-Wallet',true, now(), now()),
 ('BANK_TRANSFER','Bank Transfer',true, now(), now());
+
+
+-- Create publication for Debezium logical decoding
+CREATE PUBLICATION debezium_pub_ride_core
+FOR TABLE
+  public.ride,
+  public.driver_profile,
+  public.payment_transaction;

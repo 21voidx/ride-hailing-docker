@@ -15,7 +15,7 @@
     "plugin.name": "pgoutput",
     "slot.name": "debezium_slot_ride_core",
     "publication.name": "debezium_pub_ride_core",
-    "publication.autocreate.mode": "filtered",
+    "publication.autocreate.mode": "disabled",
 
     "table.include.list": "public.ride,public.driver_profile,public.payment_transaction",
     "include.schema.changes": "false",

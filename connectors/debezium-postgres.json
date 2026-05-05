@@ -11,12 +11,13 @@
     "database.dbname": "ride_ops_pg",
 
     "topic.prefix": "cdc",
-    "plugin.name": "pgoutput",
-    "publication.name": "debezium_pub",
-    "publication.autocreate.mode": "disabled",
-    "slot.name": "debezium_slot",
 
-    "table.include.list": "public.drivers,public.passengers,public.rides,public.vehicle_types,public.zones",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_slot_ride_core",
+    "publication.name": "debezium_pub_ride_core",
+    "publication.autocreate.mode": "disabled",
+
+    "table.include.list": "public.ride,public.driver_profile,public.payment_transaction",
     "include.schema.changes": "false",
 
     "topic.creation.enable": "true",
@@ -34,6 +35,7 @@
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.delete.tombstone.handling.mode": "rewrite",
     "transforms.unwrap.add.fields": "op,table,lsn,source.ts_ms",
+    "transforms.unwrap.add.fields.prefix": "__",
 
     "snapshot.mode": "initial",
     "snapshot.isolation.mode": "repeatable_read",

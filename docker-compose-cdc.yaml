@@ -157,8 +157,8 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8085:8080"
-    networks:
-      - taxi-network
+    # networks:
+      # - taxi-network
 
 networks:
   taxi-network:

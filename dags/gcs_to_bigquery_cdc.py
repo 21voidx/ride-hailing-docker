@@ -23,8 +23,8 @@ PROJECT_ID = os.getenv("GCP_PROJECT_ID", "dbt-taxi-explore")
 
 BUCKET_NAME = "dbt-taxi-explore-bucket"
 
-EVENT_DATASET = "bronze_cdc_events"
-CURRENT_DATASET = "bronze_cdc_current"
+EVENT_DATASET = "dev_bronze_cdc_events"
+CURRENT_DATASET = "dev_bronze_cdc_current"
 
 BQ_LOCATION = os.getenv("BQ_LOCATION", "us")
 GCP_CONN_ID = "google_cloud_default"

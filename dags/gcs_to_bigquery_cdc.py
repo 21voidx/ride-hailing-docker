@@ -1,251 +1,309 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
-from typing import List, Dict
 
-from airflow.decorators import dag, task
-from airflow.models import Variable
-from airflow.operators.python import ShortCircuitOperator, PythonOperator
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
-from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
-from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 import pendulum
 
-from google.cloud import bigquery
+from airflow import DAG
+from airflow.exceptions import AirflowSkipException
+from airflow.operators.python import PythonOperator
+from airflow.providers.google.cloud.hooks.gcs import GCSHook
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
+from airflow.timetables.interval import CronDataIntervalTimetable
 
 
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+PROJECT_ID = os.getenv("GCP_PROJECT_ID", "dbt-taxi-explore")
+
+BUCKET_NAME = "dbt-taxi-explore-bucket"
+
+EVENT_DATASET = "bronze_cdc_events"
+CURRENT_DATASET = "bronze_cdc_current"
+
+BQ_LOCATION = os.getenv("BQ_LOCATION", "us")
 GCP_CONN_ID = "google_cloud_default"
 
-PROJECT_ID = Variable.get("GCP_PROJECT_ID")
-GCS_BUCKET = Variable.get("CDC_GCS_BUCKET")
-BQ_DATASET = Variable.get("CDC_BQ_DATASET")
-GCS_ROOT_PREFIX = Variable.get("CDC_GCS_ROOT_PREFIX")
-BQ_LOCATION = Variable.get("GCP_LOCATION")
-
-MANIFEST_TABLE = "_cdc_load_manifest"
+LOCAL_TZ = pendulum.timezone("Asia/Jakarta")
 
 
-CDC_TABLES: List[Dict[str, str]] = [
-    {
-        "name": "pg_drivers",
-        "topic": "cdc.public.drivers",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.public.drivers/",
-        "bq_table": "raw_pg_drivers",
+# ============================================================
+# CDC TABLE CONFIG
+# ============================================================
+
+CDC_TABLES = {
+    "ride": {
+        "topic": "cdc.public.ride",
+        "event_table": "ride_events",
+        "current_table": "ride",
+        "pk": "ride_id",
+        "cluster_fields": ["ride_id", "driver_id", "ride_status"],
     },
-    {
-        "name": "pg_passengers",
-        "topic": "cdc.public.passengers",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.public.passengers/",
-        "bq_table": "raw_pg_passengers",
+    "driver_profile": {
+        "topic": "cdc.public.driver_profile",
+        "event_table": "driver_profile_events",
+        "current_table": "driver_profile",
+        "pk": "driver_id",
+        "cluster_fields": ["driver_id", "driver_status", "verification_status"],
     },
-    {
-        "name": "pg_rides",
-        "topic": "cdc.public.rides",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.public.rides/",
-        "bq_table": "raw_pg_rides",
+    "payment_transaction": {
+        "topic": "cdc.public.payment_transaction",
+        "event_table": "payment_transaction_events",
+        "current_table": "payment_transaction",
+        "pk": "transaction_id",
+        "cluster_fields": ["transaction_id", "ride_id", "payment_status"],
     },
-    {
-        "name": "pg_vehicle_types",
-        "topic": "cdc.public.vehicle_types",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.public.vehicle_types/",
-        "bq_table": "raw_pg_vehicle_types",
-    },
-    {
-        "name": "pg_zones",
-        "topic": "cdc.public.zones",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.public.zones/",
-        "bq_table": "raw_pg_zones",
-    },
-    {
-        "name": "mg_ride_events",
-        "topic": "cdc.ride_ops_mg.ride_events",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.ride_ops_mg.ride_events/",
-        "bq_table": "raw_mg_ride_events",
-    },
-    {
-        "name": "mg_driver_location_stream",
-        "topic": "cdc.ride_ops_mg.driver_location_stream",
-        "gcs_prefix": f"{GCS_ROOT_PREFIX}/cdc.ride_ops_mg.driver_location_stream/",
-        "bq_table": "raw_mg_driver_location_stream",
-    },
-]
+}
 
 
-def _has_new_files(list_task_id: str, **context) -> bool:
-    files = context["ti"].xcom_pull(task_ids=list_task_id)
-    return bool(files)
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+def get_process_hour(context: dict) -> pendulum.DateTime:
+    """
+    DAG berjalan setiap jam di menit ke-10.
+    Yang diproses adalah folder GCS untuk jam sebelumnya.
+
+    Contoh:
+    - DAG run: 2026-05-05 18:10 Asia/Jakarta
+    - Process hour: 2026-05-05 17:00 Asia/Jakarta
+    - GCS path: year=2026/month=05/day=05/hour=17
+    """
+
+    data_interval_end = context["data_interval_end"].in_timezone(LOCAL_TZ)
+    return data_interval_end.subtract(hours=1)
 
 
-def _mark_files_loaded(
-    list_task_id: str,
-    topic: str,
-    destination_table: str,
-    **context,
-) -> None:
-    ti = context["ti"]
-    files = ti.xcom_pull(task_ids=list_task_id) or []
+def build_gcs_prefix(table_name: str, context: dict) -> str:
+    table_conf = CDC_TABLES[table_name]
+    topic = table_conf["topic"]
 
-    if not files:
-        return
+    process_hour = get_process_hour(context)
 
-    hook = BigQueryHook(gcp_conn_id=GCP_CONN_ID, location=BQ_LOCATION)
-    client = hook.get_client(project_id=PROJECT_ID, location=BQ_LOCATION)
-
-    table_id = f"{PROJECT_ID}.{BQ_DATASET}.{MANIFEST_TABLE}"
-
-    rows = [
-        {
-            "topic": topic,
-            "object_name": object_name,
-            "destination_table": destination_table,
-            "loaded_at": datetime.now().isoformat(),
-            "dag_run_id": context["dag_run"].run_id,
-        }
-        for object_name in files
-    ]
-
-    errors = client.insert_rows_json(table_id, rows)
-
-    if errors:
-        raise RuntimeError(f"Failed to insert manifest rows: {errors}")
-
-
-@dag(
-    dag_id="cdc_gcs_to_bigquery_10min",
-    description="Incremental CDC load from GCS Parquet files to BigQuery every 10 minutes",
-    start_date=pendulum.datetime(2026, 4, 24, tz="Asia/Jakarta"),
-    schedule="*/10 * * * *",
-    catchup=False,
-    max_active_runs=1,
-    render_template_as_native_obj=True,
-    tags=["cdc", "gcs", "bigquery", "taxi-pipeline"],
-)
-def cdc_gcs_to_bigquery_10min():
-
-    ensure_manifest_table = BigQueryInsertJobOperator(
-        task_id="ensure_manifest_table",
-        gcp_conn_id=GCP_CONN_ID,
-        location=BQ_LOCATION,
-        configuration={
-            "query": {
-                "query": f"""
-                CREATE TABLE IF NOT EXISTS `{PROJECT_ID}.{BQ_DATASET}.{MANIFEST_TABLE}` (
-                    topic STRING,
-                    object_name STRING,
-                    destination_table STRING,
-                    loaded_at TIMESTAMP,
-                    dag_run_id STRING
-                )
-                PARTITION BY DATE(loaded_at)
-                CLUSTER BY topic, destination_table
-                """,
-                "useLegacySql": False,
-            }
-        },
+    return (
+        f"raw/cdc/{topic}/"
+        f"year={process_hour.strftime('%Y')}/"
+        f"month={process_hour.strftime('%m')}/"
+        f"day={process_hour.strftime('%d')}/"
+        f"hour={process_hour.strftime('%H')}"
     )
 
-    @task
-    def list_new_gcs_files(topic: str, gcs_prefix: str) -> List[str]:
-        gcs_hook = GCSHook(gcp_conn_id=GCP_CONN_ID)
 
-        all_objects = gcs_hook.list(
-            bucket_name=GCS_BUCKET,
-            prefix=gcs_prefix,
-        ) or []
+def build_bq_partition_suffix(context: dict) -> str:
+    """
+    BigQuery partition decorator untuk hourly ingestion-time partition
+    memakai UTC.
 
-        parquet_objects = sorted(
-            object_name
-            for object_name in all_objects
-            if object_name.endswith(".parquet")
+    GCS Sink memakai timezone Asia/Jakarta untuk path:
+      year=YYYY/month=MM/day=DD/hour=HH
+
+    Contoh:
+      GCS hour=17 Asia/Jakarta
+      = 10 UTC
+      partition decorator = YYYYMMDD10
+    """
+
+    process_hour_jakarta = get_process_hour(context)
+    process_hour_utc = process_hour_jakarta.in_timezone("UTC")
+
+    return process_hour_utc.strftime("%Y%m%d%H")
+
+
+def check_gcs_files(table_name: str, **context) -> None:
+    """
+    Cek apakah prefix GCS berisi file Parquet.
+    Jika kosong, task tabel tersebut di-skip agar DAG tidak gagal semua.
+    """
+
+    prefix = build_gcs_prefix(table_name, context)
+    partition_suffix = build_bq_partition_suffix(context)
+
+    hook = GCSHook(gcp_conn_id=GCP_CONN_ID)
+
+    objects = hook.list(
+        bucket_name=BUCKET_NAME,
+        prefix=prefix,
+    ) or []
+
+    parquet_objects = [
+        obj for obj in objects
+        if obj.endswith(".parquet")
+    ]
+
+    if not parquet_objects:
+        raise AirflowSkipException(
+            f"Tidak ada file Parquet untuk table={table_name}, "
+            f"prefix=gs://{BUCKET_NAME}/{prefix}/"
         )
 
-        if not parquet_objects:
-            return []
+    source_object = f"{prefix}/*.parquet"
 
-        bq_hook = BigQueryHook(gcp_conn_id=GCP_CONN_ID, location=BQ_LOCATION)
-        client = bq_hook.get_client(project_id=PROJECT_ID, location=BQ_LOCATION)
+    context["ti"].xcom_push(
+        key="source_object",
+        value=source_object,
+    )
 
-        query = f"""
-        SELECT object_name
-        FROM `{PROJECT_ID}.{BQ_DATASET}.{MANIFEST_TABLE}`
-        WHERE topic = @topic
-          AND object_name IN UNNEST(@object_names)
-        """
+    context["ti"].xcom_push(
+        key="bq_partition_suffix",
+        value=partition_suffix,
+    )
 
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("topic", "STRING", topic),
-                bigquery.ArrayQueryParameter(
-                    "object_names",
-                    "STRING",
-                    parquet_objects,
-                ),
-            ]
-        )
+    print(f"Table: {table_name}")
+    print(f"GCS prefix: gs://{BUCKET_NAME}/{prefix}/")
+    print(f"Source object: gs://{BUCKET_NAME}/{source_object}")
+    print(f"BigQuery partition suffix: {partition_suffix}")
+    print(f"Found {len(parquet_objects)} parquet file(s):")
 
-        result = client.query(query, job_config=job_config).result()
-        loaded_objects = {row.object_name for row in result}
+    for obj in parquet_objects:
+        print(f" - gs://{BUCKET_NAME}/{obj}")
 
-        new_objects = [
-            object_name
-            for object_name in parquet_objects
-            if object_name not in loaded_objects
-        ]
 
-        return new_objects
+def build_current_view_sql(table_name: str) -> str:
+    conf = CDC_TABLES[table_name]
 
-    for table_cfg in CDC_TABLES:
-        safe_name = table_cfg["name"]
+    event_table = conf["event_table"]
+    current_table = conf["current_table"]
+    pk = conf["pk"]
 
-        list_task = list_new_gcs_files.override(
-            task_id=f"list_new_files_{safe_name}"
-        )(
-            topic=table_cfg["topic"],
-            gcs_prefix=table_cfg["gcs_prefix"],
-        )
+    source_table = f"`{PROJECT_ID}.{EVENT_DATASET}.{event_table}`"
+    target_view = f"`{PROJECT_ID}.{CURRENT_DATASET}.{current_table}`"
 
-        check_task = ShortCircuitOperator(
-            task_id=f"has_new_files_{safe_name}",
-            python_callable=_has_new_files,
+    return f"""
+    CREATE OR REPLACE VIEW {target_view} AS
+
+    WITH ranked AS (
+
+        SELECT
+            e.*,
+
+            _PARTITIONTIME AS _bq_partition_time,
+
+            FORMAT_TIMESTAMP(
+                '%Y-%m-%d %H:00:00',
+                _PARTITIONTIME,
+                'Asia/Jakarta'
+            ) AS _load_hour_jakarta,
+
+            ROW_NUMBER() OVER (
+                PARTITION BY `{pk}`
+                ORDER BY
+                    SAFE_CAST(`__source_ts_ms` AS INT64) DESC,
+                    SAFE_CAST(`__lsn` AS INT64) DESC,
+                    _PARTITIONTIME DESC
+            ) AS row_num
+
+        FROM {source_table} e
+
+    )
+
+    SELECT * EXCEPT(row_num)
+    FROM ranked
+    WHERE row_num = 1
+      AND COALESCE(CAST(`__op` AS STRING), '') != 'd';
+    """
+
+
+# ============================================================
+# DAG
+# ============================================================
+
+with DAG(
+    dag_id="cdc_gcs_to_bq",
+    description=(
+        "Load CDC Parquet from GCS to manually-created BigQuery "
+        "hourly partitioned event tables with schema evolution support, "
+        "then refresh current/latest views."
+    ),
+    start_date=datetime(2026, 5, 5, 16, 0, 0, tzinfo=LOCAL_TZ),
+    schedule=CronDataIntervalTimetable("10 * * * *", timezone="Asia/Jakarta"),
+    catchup=True,
+    max_active_runs=2,
+    tags=[
+        "ride-hailing",
+        "cdc",
+        "gcs",
+        "bigquery",
+        "schema-evolution",
+        "backfill-safe",
+    ],
+) as dag:
+
+    for table_name, conf in CDC_TABLES.items():
+
+        check_files = PythonOperator(
+            task_id=f"check_gcs_files_{table_name}",
+            python_callable=check_gcs_files,
             op_kwargs={
-                "list_task_id": f"list_new_files_{safe_name}",
+                "table_name": table_name,
             },
         )
 
-        load_task = GCSToBigQueryOperator(
-            task_id=f"load_{safe_name}_to_bigquery",
-            gcp_conn_id=GCP_CONN_ID,
-            bucket=GCS_BUCKET,
-            source_objects=(
-                "{{ ti.xcom_pull(task_ids='list_new_files_"
-                + safe_name
-                + "') }}"
-            ),
+        load_events_to_partition = GCSToBigQueryOperator(
+            task_id=f"load_{table_name}_events_to_bq_partition",
+            bucket=BUCKET_NAME,
+            source_objects=[
+                "{{ ti.xcom_pull(task_ids='check_gcs_files_"
+                + table_name
+                + "', key='source_object') }}"
+            ],
             destination_project_dataset_table=(
-                f"{PROJECT_ID}.{BQ_DATASET}.{table_cfg['bq_table']}"
+                f"{PROJECT_ID}.{EVENT_DATASET}.{conf['event_table']}$"
+                "{{ ti.xcom_pull(task_ids='check_gcs_files_"
+                + table_name
+                + "', key='bq_partition_suffix') }}"
             ),
             source_format="PARQUET",
+
+            # Retry/backfill aman:
+            # partition hour yang sama ditimpa ulang, bukan append ulang.
+            write_disposition="WRITE_TRUNCATE",
+
+            # Tabel harus sudah dibuat manual lewat DDL.
+            create_disposition="CREATE_NEVER",
+
+            # Penting untuk schema evolution dari Parquet.
+            # BigQuery akan membaca schema dari file Parquet.
             autodetect=True,
-            create_disposition="CREATE_IF_NEEDED",
-            write_disposition="WRITE_APPEND",
+
+            # Penting:
+            # Mendukung penambahan kolom nullable dan relaxation.
+            # Berlaku karena destination memakai partition decorator.
             schema_update_options=[
                 "ALLOW_FIELD_ADDITION",
                 "ALLOW_FIELD_RELAXATION",
             ],
-        )
 
-        mark_loaded_task = PythonOperator(
-            task_id=f"mark_loaded_{safe_name}",
-            python_callable=_mark_files_loaded,
-            op_kwargs={
-                "list_task_id": f"list_new_files_{safe_name}",
-                "topic": table_cfg["topic"],
-                "destination_table": table_cfg["bq_table"],
+            # Target table harus hourly ingestion-time partitioned.
+            time_partitioning={
+                "type": "HOUR",
             },
+
+            cluster_fields=conf["cluster_fields"],
+
+            location=BQ_LOCATION,
+            gcp_conn_id=GCP_CONN_ID,
+
+            # Jangan False, karena Anda butuh backfill.
+            # Idempotency dijaga oleh WRITE_TRUNCATE ke partition decorator.
+            force_rerun=True,
         )
 
-        ensure_manifest_table >> list_task >> check_task >> load_task >> mark_loaded_task
+        create_or_replace_current_view = BigQueryInsertJobOperator(
+            task_id=f"create_or_replace_current_view_{table_name}",
+            configuration={
+                "query": {
+                    "query": build_current_view_sql(table_name),
+                    "useLegacySql": False,
+                }
+            },
+            location=BQ_LOCATION,
+            gcp_conn_id=GCP_CONN_ID,
+        )
 
-
-cdc_gcs_to_bigquery_10min()
+        check_files >> load_events_to_partition >> create_or_replace_current_view

@@ -1,86 +1,102 @@
-name: "ride_hailing"
+name: dbt_ride_ops
 version: "1.0.0"
 config-version: 2
-
-profile: "ride_hailing"
+profile: dbt_ride_ops
 
 model-paths: ["models"]
-macro-paths: ["macros"]
-snapshot-paths: ["snapshots"]
-seed-paths: ["seeds"]
 test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
 analysis-paths: ["analyses"]
 
 target-path: "target"
-clean-targets: ["target", "dbt_packages"]
+clean-targets:
+  - "target"
+  - "dbt_packages"
 
-# ─────────────────────────────────────────
-#  Project Variables
-# ─────────────────────────────────────────
 vars:
-  gcp_project: "dbt-taxi-explore"
-  bronze_pg_dataset: "bronze_pg"
-  incremental_lookback_days: 3
-  data_start_date: "2026-01-01"
+  start_date: "2020-01-01"
+  bq_location: "asia-southeast1"
 
-# ─────────────────────────────────────────
-#  Model Configurations (Layer Defaults)
-# ─────────────────────────────────────────
 models:
-  ride_hailing:
-
-    # ── BRONZE: source views only, no transform ──
-    bronze:
-      +schema: "bronze_pg"
+  dbt_ride_ops:
+    staging:
       +materialized: view
-      +tags: ["bronze"]
-      +persist_docs:
-        relation: true
-        columns: true
-
-    # ── SILVER: cleaned, joined, star schema ──
-    silver:
-      +schema: "silver"
-      +tags: ["silver"]
-      +persist_docs:
-        relation: true
-        columns: true
-
-      dimensions:
-        +materialized: table
-        +tags: ["silver", "dimension"]
-
-      facts:
+      +tags: []
+      cdc:
+        +tags: ["hourly"]
+        +schema: staging_cdc
+      pg:
+        +tags: ["daily"]
+        +schema: staging_pg
+    intermediate:
+      +materialized: view
+      +tags: ["daily"]
+      +schema: intermediate
+      int__ride_enriched:
         +materialized: incremental
-        +incremental_strategy: merge
-        +tags: ["silver", "fact"]
-
-    # ── GOLD: aggregated marts for dashboards ──
-    gold:
-      +schema: "gold"
-      +tags: ["gold"]
-      +persist_docs:
-        relation: true
-        columns: true
-
-      mart_operations:
-        +materialized: table
-        +tags: ["gold", "operations"]
-
-      mart_finance:
-        +materialized: table
-        +tags: ["gold", "finance"]
-
-      mart_driver:
-        +materialized: table
-        +tags: ["gold", "driver"]
-
-# ─────────────────────────────────────────
-#  Snapshot Configurations
-# ─────────────────────────────────────────
-snapshots:
-  ride_hailing:
-    +schema: "silver_snapshots"
-    +strategy: timestamp
-    +updated_at: "updated_at"
-    +tags: ["snapshot", "scd2"]
+        +tags: ["hourly"]
+        +on_schema_change: sync_all_columns
+        +partition_by:
+          field: ride_date
+          data_type: date
+        +cluster_by: ["city_code", "service_type"]
+      int__payment_enriched:
+        +materialized: incremental
+        +tags: ["hourly"]
+        +on_schema_change: sync_all_columns
+        +partition_by:
+          field: txn_date
+          data_type: date
+      int__ride_status_transitions:
+        +materialized: incremental
+        +tags: ["daily"]
+        +on_schema_change: sync_all_columns
+        +partition_by:
+          field: changed_date
+          data_type: date
+      int__rider_lifetime:
+        +materialized: incremental
+        +tags: ["daily"]
+        +on_schema_change: sync_all_columns
+    marts:
+      +materialized: table
+      +schema: marts
+      dims:
+        +tags: ["daily"]
+      facts:
+        +schema: marts
+        fct_rides:
+          +materialized: incremental
+          +tags: ["hourly"]
+          +on_schema_change: sync_all_columns
+          +partition_by:
+            field: ride_date
+            data_type: date
+          +cluster_by: ["city_code", "service_type", "ride_status"]
+        fct_payments:
+          +materialized: incremental
+          +tags: ["hourly"]
+          +on_schema_change: sync_all_columns
+          +partition_by:
+            field: txn_date
+            data_type: date
+          +cluster_by: ["payment_status", "provider_name"]
+        fct_reviews:
+          +tags: ["daily"]
+          +partition_by:
+            field: review_date
+            data_type: date
+          +cluster_by: ["review_type"]
+        fct_ride_status_transitions:
+          +materialized: incremental
+          +tags: ["daily"]
+          +on_schema_change: sync_all_columns
+          +partition_by:
+            field: changed_date
+            data_type: date
+          +cluster_by: ["new_status"]
+      aggregates:
+        +tags: ["daily"]
+        +schema: marts

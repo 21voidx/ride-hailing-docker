@@ -1,0 +1,152 @@
+version: 2
+
+sources:
+  - name: bronze_cdc_current
+    database: dbt-taxi-explore
+    schema: dev_bronze_cdc_current
+    description: >
+      BigQuery VIEWs that expose the latest deduplicated CDC records per entity,
+      sourced from Debezium → Kafka → GCS → BigQuery pipeline.
+      ROW_NUMBER() deduplication is applied in the view layer.
+
+    freshness:
+      warn_after: {count: 2, period: hour}
+      error_after: {count: 6, period: hour}
+
+    tables:
+      - name: ride
+        description: Latest state of each ride record from CDC pipeline.
+        loaded_at_field: "__source_ts_ms"
+        columns:
+          - name: ride_id
+            description: Primary key for ride.
+          - name: rider_id
+            description: FK to user_account.
+          - name: driver_id
+            description: FK to driver_profile.
+          - name: vehicle_id
+            description: FK to vehicle.
+          - name: ride_status
+            description: Current status of the ride.
+          - name: service_type
+            description: Type of service requested (e.g. STANDARD, PREMIUM).
+          - name: city_code
+            description: City identifier.
+          - name: requested_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: accepted_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: arrived_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: started_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: completed_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: cancelled_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: cancelled_by_user_id
+            description: User ID who cancelled.
+          - name: cancel_reason_code
+            description: Reason code for cancellation.
+          - name: cancel_reason_note
+            description: Free-text cancel note.
+          - name: estimated_distance_km
+            description: Estimated trip distance in km.
+          - name: estimated_duration_min
+            description: Estimated trip duration in minutes.
+          - name: created_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: updated_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: __op
+            description: CDC operation type (c/u/d/r).
+          - name: __table
+            description: Source table name.
+          - name: __lsn
+            description: Log sequence number.
+          - name: __source_ts_ms
+            description: Source event timestamp in epoch milliseconds.
+
+      - name: driver_profile
+        description: Latest state of each driver profile record from CDC pipeline.
+        loaded_at_field: "__source_ts_ms"
+        columns:
+          - name: driver_id
+            description: Primary key for driver.
+          - name: user_id
+            description: FK to user_account.
+          - name: license_number
+            description: Driver license number.
+          - name: license_expiry
+            description: License expiry date.
+          - name: driver_status
+            description: Current driver operational status.
+          - name: verification_status
+            description: KYC / document verification status.
+          - name: verified_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: suspended_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: rating_avg
+            description: Average driver rating.
+          - name: rating_count
+            description: Total number of ratings.
+          - name: created_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: updated_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: __op
+            description: CDC operation type.
+          - name: __table
+            description: Source table name.
+          - name: __lsn
+            description: Log sequence number.
+          - name: __source_ts_ms
+            description: Source event timestamp in epoch milliseconds.
+
+      - name: payment_transaction
+        description: Latest state of each payment transaction from CDC pipeline.
+        loaded_at_field: "__source_ts_ms"
+        columns:
+          - name: transaction_id
+            description: Primary key for payment transaction.
+          - name: ride_id
+            description: FK to ride.
+          - name: user_payment_method_id
+            description: FK to user_payment_method.
+          - name: provider_name
+            description: Payment provider name.
+          - name: provider_transaction_id
+            description: Provider-side transaction ID.
+          - name: idempotency_key
+            description: Idempotency key for deduplication.
+          - name: amount
+            description: Transaction amount.
+          - name: method_fee
+            description: Payment method processing fee.
+          - name: currency_code
+            description: ISO currency code.
+          - name: payment_status
+            description: Current payment status.
+          - name: failure_code
+            description: Failure code if applicable.
+          - name: failure_message
+            description: Failure message if applicable.
+          - name: authorized_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: captured_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: paid_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: created_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: updated_at
+            description: "STRING timestamp from Debezium (TIMESTAMPTZ)."
+          - name: __op
+            description: CDC operation type.
+          - name: __table
+            description: Source table name.
+          - name: __lsn
+            description: Log sequence number.
+          - name: __source_ts_ms
+            description: Source event timestamp in epoch milliseconds.

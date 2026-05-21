@@ -49,3 +49,4 @@ dev_bronze_pg&mysql.sql
 dbt_taxi/
 dbt_taxi_v2/
 script_rename.py
+dbt_ride_ops_claude/

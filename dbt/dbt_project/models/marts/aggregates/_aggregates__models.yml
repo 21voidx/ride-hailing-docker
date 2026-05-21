@@ -1,0 +1,201 @@
+version: 2
+
+models:
+  - name: agg_ride_daily
+    description: >
+      Daily ride aggregations by city_code and service_type.
+      Includes completion rates, revenue, and unique user counts.
+      Partitioned by ride_date.
+    columns:
+      - name: ride_date
+        description: Partition key. DATE of rides in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: city_code
+        description: City identifier.
+        tests:
+          - not_null
+      - name: service_type
+        description: Service type.
+        tests:
+          - not_null
+      - name: total_rides
+        description: Total ride count for the day/city/service.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: completed_rides
+        description: Count of completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: cancelled_rides
+        description: Count of cancelled rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: gross_revenue
+        description: Sum of total_fare for completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: completion_rate
+        description: Ratio of completed to total rides.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "completion_rate is not null"
+      - name: cancellation_rate
+        description: Ratio of cancelled to total rides.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "cancellation_rate is not null"
+
+  - name: agg_driver_daily
+    description: >
+      Daily driver activity aggregations including earnings, trip counts,
+      and review metrics. Partitioned by activity_date.
+    columns:
+      - name: driver_id
+        description: FK to dim_driver.
+        tests:
+          - not_null
+      - name: activity_date
+        description: DATE of driver activity in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: total_rides
+        description: Total rides assigned.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: completed_rides
+        description: Rides completed.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_earnings
+        description: Total driver payout for completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: agg_revenue_daily
+    description: >
+      Daily revenue aggregation by city and service type, combining ride
+      gross revenue with payment transaction totals and refunds.
+      Partitioned by revenue_date.
+    columns:
+      - name: revenue_date
+        description: DATE of revenue in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: city_code
+        description: City identifier.
+        tests:
+          - not_null
+      - name: service_type
+        description: Service type.
+        tests:
+          - not_null
+      - name: gross_revenue
+        description: Sum of total_fare for completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: net_revenue
+        description: Gross revenue minus total refunds.
+        tests:
+          - not_null
+      - name: total_refunds
+        description: Total refunded amount.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: agg_rider_monthly
+    description: >
+      Monthly rider activity aggregations. Grain: rider_id + activity_month.
+      Includes cohort, segment, and spend metrics.
+      Partitioned by activity_month.
+    columns:
+      - name: rider_id
+        description: FK to dim_rider.
+        tests:
+          - not_null
+      - name: activity_month
+        description: First day of the activity month (DATE_TRUNC MONTH).
+        tests:
+          - not_null
+      - name: total_rides
+        description: Total rides in the month.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_spend
+        description: Total spend on completed rides in the month.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: months_since_signup
+        description: Months between activity_month and cohort_month.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              config:
+                where: "months_since_signup is not null"
+
+  - name: agg_promo_summary
+    description: >
+      Daily promotion usage summary. Grain: promotion_id + usage_date.
+      Tracks discount spend, rides, unique riders, and completion rates.
+      Partitioned by usage_date.
+    columns:
+      - name: promotion_id
+        description: FK to dim_promotion.
+        tests:
+          - not_null
+      - name: usage_date
+        description: DATE of promo usage.
+        tests:
+          - not_null
+      - name: promo_code
+        description: Promotion code.
+        tests:
+          - not_null
+      - name: rides_with_promo
+        description: Number of rides where promo was applied.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_discount_applied
+        description: Total discount amount applied.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: promo_completion_rate
+        description: Ratio of completed promo rides to total promo rides.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "promo_completion_rate is not null"

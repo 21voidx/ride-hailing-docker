@@ -1,0 +1,262 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: >
+      Date dimension spanning 2020-01-01 to current_date + 1 year.
+      Includes Indonesian public holidays 2020–2026 as a hardcoded lookup.
+    columns:
+      - name: date_day
+        description: Primary key. One row per calendar day.
+        tests:
+          - not_null
+          - unique
+      - name: year
+        description: Calendar year.
+        tests:
+          - not_null
+      - name: quarter
+        description: Calendar quarter (1–4).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 4
+      - name: month
+        description: Calendar month (1–12).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 12
+      - name: week_of_year
+        description: ISO week number of the year.
+        tests:
+          - not_null
+      - name: day_of_week
+        description: Day of week (1=Sunday, 7=Saturday in BigQuery).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 7
+      - name: day_name
+        description: Full day name in English (Monday, Tuesday, etc.).
+        tests:
+          - not_null
+      - name: month_name
+        description: Full month name in English.
+        tests:
+          - not_null
+      - name: is_weekend
+        description: TRUE if Saturday or Sunday.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_public_holiday_id
+        description: TRUE if date is an Indonesian national public holiday (2020–2026).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: season
+        description: Quarter label (e.g. Q1 (Jan–Mar)).
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Q1 (Jan–Mar)', 'Q2 (Apr–Jun)', 'Q3 (Jul–Sep)', 'Q4 (Oct–Dec)']
+
+  - name: dim_rider
+    description: >
+      SCD Type 1 rider dimension. One row per rider_id with latest snapshot
+      of user data and lifetime aggregates. Segment is derived from
+      days_since_last_ride and total_rides.
+    columns:
+      - name: user_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: rider_id
+        description: Alias for user_id (used in fact joins).
+        tests:
+          - not_null
+      - name: username
+        description: Unique username.
+        tests:
+          - not_null
+      - name: account_status
+        description: Account status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING','DELETED']
+      - name: signup_date
+        description: DATE of account signup in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: cohort_month
+        description: Month-level signup cohort (first day of month).
+        tests:
+          - not_null
+      - name: total_rides
+        description: Total rides across all statuses.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_spend
+        description: Total amount spent on completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: segment
+        description: Rider segment (new / active / at_risk / churned).
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['new','active','at_risk','churned']
+
+  - name: dim_driver
+    description: SCD Type 1 driver dimension. One row per driver_id.
+    columns:
+      - name: driver_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: FK to dim_rider / user_account.
+        tests:
+          - not_null
+      - name: driver_status
+        description: Operational status of the driver.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING']
+      - name: verification_status
+        description: KYC verification status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PENDING','VERIFIED','REJECTED','EXPIRED']
+      - name: rating_avg
+        description: Average driver rating.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 5
+              config:
+                where: "rating_avg is not null"
+      - name: all_docs_verified
+        description: TRUE if all submitted documents are verified and not expired.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: dim_vehicle
+    description: Vehicle dimension. One row per vehicle_id.
+    columns:
+      - name: vehicle_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: license_plate
+        description: Vehicle license plate.
+        tests:
+          - not_null
+      - name: vehicle_type
+        description: Vehicle type classification.
+        tests:
+          - not_null
+      - name: vehicle_make
+        description: Manufacturer.
+        tests:
+          - not_null
+      - name: vehicle_model
+        description: Model name.
+        tests:
+          - not_null
+      - name: vehicle_year
+        description: Manufacturing year.
+        tests:
+          - not_null
+      - name: vehicle_status
+        description: Operational status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING_REVIEW']
+      - name: is_active
+        description: TRUE if vehicle_status = 'ACTIVE'.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: dim_promotion
+    description: Promotion dimension. One row per promotion_id.
+    columns:
+      - name: promotion_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: promo_code
+        description: Unique promo code.
+        tests:
+          - not_null
+      - name: discount_type
+        description: PERCENTAGE or FIXED.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PERCENTAGE','FIXED']
+      - name: valid_from
+        description: Validity start.
+        tests:
+          - not_null
+      - name: valid_to
+        description: Validity end.
+        tests:
+          - not_null
+      - name: promotion_status
+        description: Current promotion status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','EXPIRED','DRAFT']
+      - name: is_currently_valid
+        description: TRUE if active and within valid date range.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: dim_payment_method_type
+    description: Lookup table for payment method types.
+    columns:
+      - name: payment_method_type_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: method_code
+        description: Unique method code.
+        tests:
+          - not_null
+      - name: method_name
+        description: Human-readable name.
+        tests:
+          - not_null
+      - name: is_active
+        description: Whether method type is available.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]

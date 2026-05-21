@@ -1,0 +1,183 @@
+version: 2
+
+sources:
+  - name: bronze_pg
+    database: dbt-taxi-explore
+    schema: dev_bronze_pg
+    description: >
+      Batch-loaded BigQuery tables sourced from PostgreSQL via Airflow → Trino pipeline.
+      Append-only and upsert tables loaded on a daily schedule.
+
+    freshness:
+      warn_after: {count: 25, period: hour}
+      error_after: {count: 49, period: hour}
+
+    tables:
+      - name: ride_status_history
+        description: Immutable history of ride status transitions.
+        loaded_at_field: "_ingested_at"
+        columns:
+          - name: ride_status_history_id
+            description: Primary key.
+          - name: ride_id
+            description: FK to ride.
+          - name: old_status
+            description: Previous ride status.
+          - name: new_status
+            description: New ride status after transition.
+          - name: changed_by_user_id
+            description: User who triggered the status change.
+          - name: reason_code
+            description: Reason code for the transition.
+          - name: reason_note
+            description: Free-text reason note.
+          - name: changed_at
+            description: Timestamp of the status change.
+          - name: created_at
+            description: Record creation timestamp.
+
+      - name: ride_location
+        description: Pickup and dropoff location data per ride.
+        loaded_at_field: "_ingested_at"
+        columns:
+          - name: ride_location_id
+            description: Primary key.
+          - name: ride_id
+            description: FK to ride.
+          - name: location_type
+            description: "Type of location (PICKUP, DROPOFF, PICKUP_ACTUAL, DROPOFF_ACTUAL)."
+          - name: latitude
+            description: Latitude coordinate.
+          - name: longitude
+            description: Longitude coordinate.
+          - name: address_text
+            description: Human-readable address.
+          - name: place_id
+            description: External place identifier.
+          - name: captured_at
+            description: Timestamp when location was captured.
+
+      - name: ride_tracking_point
+        description: GPS tracking points during a ride.
+        loaded_at_field: "_ingested_at"
+
+      - name: ride_fare
+        description: Fare calculations per ride. May contain multiple versions; use fare_type=FINAL.
+        loaded_at_field: "_ingested_at"
+        columns:
+          - name: fare_id
+            description: Primary key.
+          - name: ride_id
+            description: FK to ride.
+          - name: fare_type
+            description: "Fare version type: ESTIMATE, FINAL."
+          - name: fare_version
+            description: Version number of the fare calculation.
+          - name: currency_code
+            description: ISO currency code.
+          - name: distance_km
+            description: Actual trip distance in km.
+          - name: duration_min
+            description: Actual trip duration in minutes.
+          - name: base_fare
+            description: Base fare amount.
+          - name: distance_fare
+            description: Distance-based fare component.
+          - name: time_fare
+            description: Time-based fare component.
+          - name: surge_multiplier
+            description: Surge multiplier applied.
+          - name: surge_amount
+            description: Additional surge amount.
+          - name: discount_amount
+            description: Discount applied.
+          - name: tax_amount
+            description: Tax amount.
+          - name: platform_fee
+            description: Platform service fee.
+          - name: driver_earning
+            description: Amount allocated to driver.
+          - name: total_fare
+            description: Total amount charged to rider.
+          - name: fare_rule_code
+            description: Pricing rule identifier.
+          - name: calculated_at
+            description: Timestamp of fare calculation.
+
+      - name: ride_fare_component
+        description: Line-item fare components for each fare record.
+        loaded_at_field: "_ingested_at"
+        columns:
+          - name: fare_component_id
+            description: Primary key.
+          - name: fare_id
+            description: FK to ride_fare.
+          - name: component_code
+            description: Component identifier code.
+          - name: component_name
+            description: Human-readable component name.
+          - name: component_amount
+            description: Amount for this component.
+          - name: description
+            description: Additional description.
+
+      - name: promo_usage
+        description: Records of promotion codes applied to rides.
+        loaded_at_field: "_ingested_at"
+        columns:
+          - name: promo_usage_id
+            description: Primary key.
+          - name: promotion_id
+            description: FK to promotion.
+          - name: ride_id
+            description: FK to ride.
+          - name: rider_id
+            description: FK to user_account (rider).
+          - name: discount_amount_applied
+            description: Actual discount amount applied.
+          - name: used_at
+            description: Timestamp of promo usage.
+
+      - name: role
+        description: System roles (RIDER, DRIVER, ADMIN, etc).
+        loaded_at_field: "_ingested_at"
+
+      - name: payment_method_type
+        description: Supported payment method types.
+        loaded_at_field: "_ingested_at"
+
+      - name: promotion
+        description: Promotion / voucher definitions.
+        loaded_at_field: "_ingested_at"
+
+      - name: user_account
+        description: User accounts (both riders and drivers).
+        loaded_at_field: "_ingested_at"
+
+      - name: user_role
+        description: User-to-role assignments.
+        loaded_at_field: "_ingested_at"
+
+      - name: driver_document
+        description: Driver KYC and compliance documents.
+        loaded_at_field: "_ingested_at"
+
+      - name: vehicle
+        description: Vehicle registry.
+        loaded_at_field: "_ingested_at"
+
+      - name: driver_vehicle_assignment
+        description: Assignment records linking drivers to vehicles.
+        loaded_at_field: "_ingested_at"
+
+      - name: user_payment_method
+        description: Saved payment methods per user. Sensitive token fields excluded at staging.
+        loaded_at_field: "_ingested_at"
+
+      - name: review
+        description: Rider and driver reviews per ride.
+        loaded_at_field: "_ingested_at"
+
+      - name: payment_refund
+        description: Refund records against payment transactions.
+        loaded_at_field: "_ingested_at"

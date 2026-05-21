@@ -1,0 +1,337 @@
+version: 2
+
+models:
+  - name: int__ride_enriched
+    description: >
+      Enriched ride records combining CDC ride data with final fares, pivot locations,
+      and promo usage. Incremental on __source_ts_ms. One row per ride_id.
+    columns:
+      - name: ride_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: rider_id
+        description: FK to stg_pg__users.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_pg__users')
+              field: user_id
+      - name: driver_id
+        description: FK to stg_cdc__driver_profiles.
+        tests:
+          - not_null
+      - name: vehicle_id
+        description: FK to stg_pg__vehicles.
+        tests:
+          - not_null
+      - name: ride_status
+        description: Current ride status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
+      - name: service_type
+        description: Type of service.
+        tests:
+          - not_null
+      - name: city_code
+        description: City identifier.
+        tests:
+          - not_null
+      - name: requested_at
+        description: Timestamp when ride was requested.
+        tests:
+          - not_null
+      - name: ride_date
+        description: DATE of ride in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: hour_of_day
+        description: Hour of day (0–23) of the ride request.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 23
+      - name: day_of_week
+        description: Day of week (1=Sunday, 7=Saturday).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 7
+      - name: is_completed
+        description: TRUE if ride completed successfully.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_cancelled
+        description: TRUE if ride was cancelled.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_cancelled_by_rider
+        description: TRUE if cancellation was initiated by rider.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_cancelled_by_driver
+        description: TRUE if cancellation was initiated by driver.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: has_surge
+        description: TRUE if surge_multiplier > 1.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: has_promo
+        description: TRUE if a promotion was applied to this ride.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: total_fare
+        description: Total fare charged.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              config:
+                where: "total_fare is not null"
+      - name: duration_minutes
+        description: Actual trip duration in minutes (completed_at - started_at).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              config:
+                where: "duration_minutes is not null"
+      - name: __source_ts_ms
+        description: Source event timestamp epoch ms (used for incremental filter).
+        tests:
+          - not_null
+
+  - name: int__driver_enriched
+    description: >
+      Enriched driver records joining CDC driver_profiles with user data,
+      active vehicle assignment, and document verification aggregation.
+    columns:
+      - name: driver_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: FK to stg_pg__users.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_pg__users')
+              field: user_id
+      - name: driver_status
+        description: Driver operational status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING']
+      - name: verification_status
+        description: KYC verification status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PENDING','VERIFIED','REJECTED','EXPIRED']
+      - name: is_verified
+        description: Boolean flag for verified status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_suspended
+        description: Boolean flag for suspended status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: all_docs_verified
+        description: TRUE if all submitted documents are verified and none expired.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: rating_avg
+        description: Average driver rating.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 5
+              config:
+                where: "rating_avg is not null"
+
+  - name: int__payment_enriched
+    description: >
+      Enriched payment records combining CDC transaction data with refund aggregation,
+      user payment method details, and payment method type.
+    columns:
+      - name: transaction_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: ride_id
+        description: FK to int__ride_enriched.
+        tests:
+          - not_null
+      - name: user_payment_method_id
+        description: FK to stg_pg__user_payment_methods.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_pg__user_payment_methods')
+              field: user_payment_method_id
+      - name: txn_date
+        description: Transaction date in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: amount
+        description: Transaction amount.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_refunded
+        description: Total amount refunded (completed refunds only).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: net_amount
+        description: Net amount after refunds (amount - total_refunded).
+        tests:
+          - not_null
+      - name: is_paid
+        description: TRUE if payment_status = 'PAID'.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_failed
+        description: TRUE if payment_status = 'FAILED'.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_refunded
+        description: TRUE if payment_status = 'REFUNDED'.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: __source_ts_ms
+        description: CDC event epoch ms for incremental filtering.
+        tests:
+          - not_null
+
+  - name: int__ride_status_transitions
+    description: >
+      Status transition log enriched with LAG-based duration and anomaly detection.
+      An anomaly is flagged when duration is negative or the transition sequence is invalid.
+    columns:
+      - name: ride_status_history_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: ride_id
+        description: FK to stg_cdc__rides.
+        tests:
+          - not_null
+      - name: old_status
+        description: Status before this transition.
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
+              config:
+                where: "old_status is not null"
+      - name: new_status
+        description: Status after this transition.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
+      - name: changed_at
+        description: Timestamp of the transition.
+        tests:
+          - not_null
+      - name: changed_date
+        description: DATE of the transition in Asia/Jakarta timezone.
+        tests:
+          - not_null
+      - name: duration_seconds_in_prev_status
+        description: Seconds spent in the previous status.
+      - name: is_anomaly
+        description: TRUE if the transition is invalid or duration is negative.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: int__rider_lifetime
+    description: >
+      Per-rider lifetime aggregation from int__ride_enriched.
+      Incremental on rider_id; recalculates on new ride events.
+    columns:
+      - name: rider_id
+        description: Primary key.
+        tests:
+          - not_null
+          - unique
+      - name: total_rides
+        description: Total number of rides (all statuses).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: completed_rides
+        description: Number of completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: cancelled_rides
+        description: Number of cancelled rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: total_spend
+        description: Total spend on completed rides.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: avg_fare
+        description: Average fare on completed rides.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              config:
+                where: "avg_fare is not null"
+      - name: first_ride_at
+        description: Timestamp of first ride request.
+      - name: last_ride_at
+        description: Timestamp of most recent ride request.
+      - name: days_since_last_ride
+        description: Number of days since the most recent ride.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              config:
+                where: "days_since_last_ride is not null"
+      - name: favorite_service_type
+        description: Most frequently used service type (completed rides).

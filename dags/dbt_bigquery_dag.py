@@ -163,7 +163,7 @@ def _dbt_task(task_id: str, command_body: str, retries: int = 1) -> DockerOperat
     default_args={
         "owner": "data-engineering",
         "email": [os.getenv("ALERT_EMAIL", "data-engineering@company.co.id")],
-        "email_on_failure": True,
+        "email_on_failure": False,
         "retries": 1,
     },
 )

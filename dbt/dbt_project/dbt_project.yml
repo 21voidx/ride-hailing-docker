@@ -16,8 +16,8 @@ clean-targets:
   - "dbt_packages"
 
 vars:
-  start_date: "2020-01-01"
-  bq_location: "asia-southeast1"
+  start_date: "2026-01-01"
+  bq_location: "us"
 
 models:
   dbt_ride_ops:

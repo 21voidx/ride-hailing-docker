@@ -9,7 +9,7 @@
 with events as (
     select *
     from {{ ref('stg_cdc__payment_transaction_events') }}
-    where {{ cdc_partition_filter(days_back=3) }}
+    where {{ cdc_partition_filter(days_back=30) }}
     {% if is_incremental() %}
     and __source_ts_ms > (
         select MAX(__source_ts_ms)

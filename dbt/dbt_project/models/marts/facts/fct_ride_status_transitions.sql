@@ -2,46 +2,34 @@
     config(
         materialized='incremental',
         unique_key='ride_status_history_id',
-        on_schema_change='sync_all_columns',
-        partition_by={
-            'field': 'changed_date',
-            'data_type': 'date'
-        },
-        cluster_by=['new_status']
+        on_schema_change='append_new_columns'
     )
 }}
 
 with transitions as (
-
-    select * from {{ ref('int__ride_status_transitions') }}
-
+    select *
+    from {{ ref('int__ride_status_transitions') }}
     {% if is_incremental() %}
     where changed_at > (
-        select coalesce(MAX(changed_at), '2020-01-01')
+        select TIMESTAMP_SUB(MAX(changed_at), INTERVAL 1 HOUR)
         from {{ this }}
     )
     {% endif %}
-
 ),
 
-fct_rides_ref as (
-
-    select
-        ride_id,
-        rider_id,
-        driver_id,
-        service_type,
-        city_code,
-        ride_date
+rides as (
+    select ride_id, rider_id, driver_id, city_code, service_type, ride_date
     from {{ ref('fct_rides') }}
-
 ),
 
 final as (
-
     select
         t.ride_status_history_id,
         t.ride_id,
+        r.rider_id,
+        r.driver_id,
+        r.city_code,
+        r.service_type,
         t.old_status,
         t.new_status,
         t.changed_by_user_id,
@@ -49,22 +37,12 @@ final as (
         t.reason_note,
         t.changed_at,
         t.changed_date,
-        t.created_at,
-        t.prev_status_changed_at,
         t.duration_seconds_in_prev_status,
         t.is_anomaly,
-
-        fr.rider_id,
-        fr.driver_id,
-        fr.service_type,
-        fr.city_code,
-        fr.ride_date,
-
-        CURRENT_TIMESTAMP()     as _dbt_loaded_at
-
+        t.event_max_lsn,
+        t.event_max_source_ts_ms
     from transitions t
-    left join fct_rides_ref fr on t.ride_id = fr.ride_id
-
+    left join rides r on t.ride_id = r.ride_id
 )
 
 select * from final

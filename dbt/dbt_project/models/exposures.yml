@@ -1,71 +1,56 @@
 version: 2
 
 exposures:
-
-  - name: looker_operations_dashboard
-    label: "Operations Dashboard"
+  - name: looker_studio_operations
     type: dashboard
-    maturity: high
-    url: https://looker.internal/dashboards/operations
     description: >
-      Real-time operations dashboard tracking ride volume, driver activity,
-      ride status transitions, and anomalies by city and service type.
+      Operational dashboard tracking daily ride volume, completion rates,
+      cancellation trends, and surge patterns across cities and service types.
     owner:
-      name: Data Analytics Team
-      email: data-analytics@company.com
+      name: Data Analytics
+      email: analytics@company.com
+    url: https://lookerstudio.google.com/reporting/<report-id-operations>
     depends_on:
       - ref('agg_ride_daily')
       - ref('agg_driver_daily')
-      - ref('fct_ride_status_transitions')
       - ref('dim_date')
 
-  - name: looker_driver_dashboard
-    label: "Driver Performance Dashboard"
+  - name: looker_studio_driver_performance
     type: dashboard
-    maturity: high
-    url: https://looker.internal/dashboards/driver-performance
     description: >
-      Driver performance dashboard covering daily earnings, trip completion rates,
-      review scores, document verification status, and vehicle assignments.
+      Driver performance dashboard showing daily trip counts, earnings,
+      ratings, and completion rates per driver.
     owner:
-      name: Data Analytics Team
-      email: data-analytics@company.com
+      name: Data Analytics
+      email: analytics@company.com
+    url: https://lookerstudio.google.com/reporting/<report-id-driver>
     depends_on:
       - ref('agg_driver_daily')
-      - ref('dim_driver')
-      - ref('fct_reviews')
       - ref('dim_date')
 
-  - name: looker_finance_dashboard
-    label: "Finance & Revenue Dashboard"
+  - name: looker_studio_finance
     type: dashboard
-    maturity: high
-    url: https://looker.internal/dashboards/finance-revenue
     description: >
-      Finance and revenue dashboard covering gross revenue, net revenue,
-      refunds, payment method breakdown, and promotion discount spend.
+      Finance dashboard covering gross/net revenue, refunds, platform fees,
+      and driver payouts segmented by city and service type.
     owner:
-      name: Data Analytics Team
-      email: data-analytics@company.com
+      name: Data Analytics
+      email: analytics@company.com
+    url: https://lookerstudio.google.com/reporting/<report-id-finance>
     depends_on:
       - ref('agg_revenue_daily')
-      - ref('fct_payments')
-      - ref('dim_promotion')
       - ref('dim_date')
 
-  - name: looker_growth_dashboard
-    label: "Growth & Retention Dashboard"
+  - name: looker_studio_growth
     type: dashboard
-    maturity: high
-    url: https://looker.internal/dashboards/growth-retention
     description: >
-      Growth and retention dashboard tracking rider cohorts, monthly active riders,
-      churn segments, promo effectiveness, and lifetime value trends.
+      Growth dashboard showing monthly active riders, cohort retention,
+      promo effectiveness, and rider segmentation trends.
     owner:
-      name: Data Analytics Team
-      email: data-analytics@company.com
+      name: Data Analytics
+      email: analytics@company.com
+    url: https://lookerstudio.google.com/reporting/<report-id-growth>
     depends_on:
       - ref('agg_rider_monthly')
       - ref('agg_promo_summary')
-      - ref('dim_rider')
       - ref('dim_date')

@@ -2,90 +2,80 @@
     config(
         materialized='incremental',
         unique_key='ride_id',
-        on_schema_change='sync_all_columns'
+        on_schema_change='append_new_columns'
     )
 }}
 
 with rides as (
-
-    select * from {{ ref('stg_cdc__rides') }}
-
+    select *
+    from {{ ref('stg_cdc__rides') }}
     {% if is_incremental() %}
-    where __source_ts_ms > (
-        select coalesce(MAX(__source_ts_ms), 0)
+    where TIMESTAMP_MILLIS(__source_ts_ms) > (
+        select TIMESTAMP_SUB(MAX(TIMESTAMP_MILLIS(__source_ts_ms)), INTERVAL 1 HOUR)
         from {{ this }}
     )
     {% endif %}
-
 ),
 
 fares as (
-
-    select * from {{ ref('stg_pg__ride_fares') }}
-
+    select *
+    from {{ ref('stg_pg__ride_fares') }}
+    where fare_type = 'FINAL'
 ),
 
-locations as (
-
-    select * from {{ ref('stg_pg__ride_locations') }}
-
-),
-
-promo_usages as (
-
+locations_pivoted as (
     select
         ride_id,
-        SUM(discount_amount_applied) as total_promo_discount,
-        COUNT(*)                     as promo_usage_count,
-        MAX(promotion_id)            as promotion_id
-    from {{ ref('stg_pg__promo_usages') }}
-    group by 1
-
+        MAX(case when location_type = 'PICKUP_REQUESTED'  then latitude  end) as pickup_lat,
+        MAX(case when location_type = 'PICKUP_REQUESTED'  then longitude end) as pickup_lng,
+        MAX(case when location_type = 'DROPOFF_REQUESTED' then latitude  end) as dropoff_lat,
+        MAX(case when location_type = 'DROPOFF_REQUESTED' then longitude end) as dropoff_lng
+    from {{ ref('stg_pg__ride_locations') }}
+    group by ride_id
 ),
 
-enriched as (
+promos as (
+    select *
+    from {{ ref('stg_pg__promo_usages') }}
+),
 
+final as (
     select
+        -- identifiers
         r.ride_id,
         r.rider_id,
         r.driver_id,
         r.vehicle_id,
+
+        -- ride attributes
         r.ride_status,
         r.service_type,
         r.city_code,
+        r.cancel_reason_code,
+        r.cancel_reason_note,
+        r.estimated_distance_km,
+        r.estimated_duration_min,
 
+        -- timestamps
         r.requested_at,
         r.accepted_at,
         r.arrived_at,
         r.started_at,
         r.completed_at,
         r.cancelled_at,
-
         r.cancelled_by_user_id,
-        r.cancel_reason_code,
-        r.cancel_reason_note,
-
-        r.estimated_distance_km,
-        r.estimated_duration_min,
-
         r.created_at,
         r.updated_at,
+
+        -- date dimensions
         r.ride_date,
+        CAST(EXTRACT(HOUR FROM r.requested_at) AS INT64)        as hour_of_day,
+        CAST(EXTRACT(DAYOFWEEK FROM r.requested_at) AS INT64)   as day_of_week,
 
-        EXTRACT(HOUR FROM r.requested_at AT TIME ZONE 'Asia/Jakarta') as hour_of_day,
-        EXTRACT(DAYOFWEEK FROM r.ride_date)                            as day_of_week,
-
-        (r.ride_status = 'COMPLETED')                                  as is_completed,
-        (r.ride_status = 'CANCELLED')                                  as is_cancelled,
-        (r.ride_status = 'CANCELLED'
-            and r.cancelled_by_user_id = r.rider_id)                   as is_cancelled_by_rider,
-        (r.ride_status = 'CANCELLED'
-            and r.cancelled_by_user_id = r.driver_id)                  as is_cancelled_by_driver,
-
+        -- fare
         f.fare_id,
-        f.currency_code,
-        f.distance_km,
-        f.duration_min,
+        f.fare_rule_code,
+        f.total_fare,
         f.base_fare,
         f.distance_fare,
         f.time_fare,
@@ -95,45 +85,45 @@ enriched as (
         f.tax_amount,
         f.platform_fee,
         f.driver_earning,
-        f.total_fare,
-        f.total_fare_before_discount,
-        f.fare_rule_code,
+        f.distance_km,
+        f.duration_min,
 
-        (f.surge_multiplier > 1)                                       as has_surge,
-        (pu.ride_id is not null)                                       as has_promo,
+        -- locations (pivoted)
+        l.pickup_lat,
+        l.pickup_lng,
+        l.dropoff_lat,
+        l.dropoff_lng,
 
-        pu.promotion_id,
-        pu.total_promo_discount,
+        -- promo
+        p.promo_usage_id,
+        p.promotion_id,
+        p.discount_amount_applied as promo_discount_amount,
 
-        SAFE_DIVIDE(
-            TIMESTAMP_DIFF(r.completed_at, r.started_at, SECOND),
-            60.0
-        )                                                              as duration_minutes,
+        -- boolean flags
+        r.ride_status = 'COMPLETED'                             as is_completed,
+        r.ride_status = 'CANCELLED'                             as is_cancelled,
+        (r.ride_status = 'CANCELLED'
+         and r.cancelled_by_user_id = r.rider_id)               as is_cancelled_by_rider,
+        (r.ride_status = 'CANCELLED'
+         and r.cancelled_by_user_id is not null
+         and r.cancelled_by_user_id != r.rider_id)              as is_cancelled_by_driver,
+        COALESCE(f.surge_multiplier > 1, false)                 as has_surge,
+        p.promo_usage_id is not null                            as has_promo,
 
-        l.pickup_latitude,
-        l.pickup_longitude,
-        l.pickup_address,
-        l.pickup_place_id,
-        l.dropoff_latitude,
-        l.dropoff_longitude,
-        l.dropoff_address,
-        l.dropoff_place_id,
-        l.pickup_actual_latitude,
-        l.pickup_actual_longitude,
-        l.pickup_actual_address,
-        l.dropoff_actual_latitude,
-        l.dropoff_actual_longitude,
-        l.dropoff_actual_address,
+        -- derived metric
+        CAST(
+            TIMESTAMP_DIFF(r.completed_at, r.started_at, MINUTE)
+        AS NUMERIC)                                             as duration_minutes,
 
-        r.__source_ts_ms,
+        -- CDC metadata
         r.__op,
-        r.__lsn
+        r.__lsn,
+        r.__source_ts_ms
 
     from rides r
-    left join fares     f  on r.ride_id = f.ride_id
-    left join locations l  on r.ride_id = l.ride_id
-    left join promo_usages pu on r.ride_id = pu.ride_id
-
+    left join fares f          on r.ride_id = f.ride_id
+    left join locations_pivoted l on r.ride_id = l.ride_id
+    left join promos p          on r.ride_id = p.ride_id
 )
 
-select * from enriched
+select * from final

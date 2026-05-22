@@ -1,75 +1,64 @@
-{{
-    config(
-        materialized='table',
-        tags=['daily']
-    )
-}}
-
 with users as (
-
     select * from {{ ref('stg_pg__users') }}
-
 ),
 
 user_roles as (
-
     select
         ur.user_id,
-        STRING_AGG(r.role_code ORDER BY r.role_code) as role_codes
+        STRING_AGG(r.role_code order by r.role_code) as roles
     from {{ ref('stg_pg__user_roles') }} ur
-    left join {{ ref('stg_pg__roles') }} r on ur.role_id = r.role_id
+    join {{ ref('stg_pg__roles') }} r using (role_id)
     where ur.is_active = true
-    group by 1
-
+    group by ur.user_id
 ),
 
 lifetime as (
-
     select * from {{ ref('int__rider_lifetime') }}
-
 ),
 
-segmented as (
-
+final as (
     select
         u.user_id,
-        u.rider_id,
         u.username,
         u.email,
         u.phone_number,
         u.account_status,
         u.signup_date,
-        u.cohort_month,
         u.created_at,
         u.updated_at,
+        u.deleted_at,
 
-        ur.role_codes,
+        -- cohort_month computed here (not in staging)
+        DATE_TRUNC(u.signup_date, MONTH)                                as cohort_month,
 
-        IFNULL(l.total_rides, 0)        as total_rides,
-        IFNULL(l.completed_rides, 0)    as completed_rides,
-        IFNULL(l.cancelled_rides, 0)    as cancelled_rides,
-        IFNULL(l.total_spend, 0)        as total_spend,
-        l.avg_fare,
+        -- role summary
+        COALESCE(ur.roles, 'RIDER')                                     as roles,
+
+        -- lifetime stats
+        COALESCE(l.total_rides, 0)                                      as total_rides,
+        COALESCE(l.completed_rides, 0)                                  as completed_rides,
+        COALESCE(l.cancelled_rides, 0)                                  as cancelled_rides,
+        COALESCE(l.total_spend, 0)                                      as total_spend,
         l.first_ride_at,
         l.last_ride_at,
-        l.days_since_last_ride,
+        COALESCE(l.days_since_last_ride, 99999)                         as days_since_last_ride,
+        l.avg_fare,
         l.favorite_service_type,
 
+        -- segment
         CASE
-            WHEN IFNULL(l.total_rides, 0) = 0
+            WHEN COALESCE(l.total_rides, 0) <= 1
                 THEN 'new'
-            WHEN IFNULL(l.days_since_last_ride, 9999) <= 30
-             AND IFNULL(l.completed_rides, 0) >= 1
+            WHEN COALESCE(l.days_since_last_ride, 99999) <= 30
                 THEN 'active'
-            WHEN IFNULL(l.days_since_last_ride, 9999) BETWEEN 31 AND 90
+            WHEN COALESCE(l.days_since_last_ride, 99999) <= 90
                 THEN 'at_risk'
             ELSE 'churned'
-        END                             as segment
+        END                                                             as segment
 
-    from users          u
-    left join user_roles ur on u.user_id = ur.user_id
-    left join lifetime   l  on u.user_id = l.rider_id
-
+    from users u
+    left join user_roles ur  on u.user_id = ur.user_id
+    left join lifetime l     on u.user_id = l.user_id
 )
 
-select * from segmented
+select * from final

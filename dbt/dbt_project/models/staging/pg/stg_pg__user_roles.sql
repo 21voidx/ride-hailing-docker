@@ -1,22 +1,15 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'user_role') }}
-
+    select * from {{ source('dev_bronze_pg', 'user_role') }}
 ),
 
-renamed as (
-
+final as (
     select
         user_id,
         role_id,
         assigned_at,
         assigned_by,
-        is_active,
-        _ingested_at,
-        _source_system
-
+        is_active
     from source
-
 )
 
-select * from renamed
+select * from final

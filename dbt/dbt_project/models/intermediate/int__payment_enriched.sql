@@ -2,48 +2,39 @@
     config(
         materialized='incremental',
         unique_key='transaction_id',
-        on_schema_change='sync_all_columns'
+        on_schema_change='append_new_columns'
     )
 }}
 
-with transactions as (
-
-    select * from {{ ref('stg_cdc__payment_transactions') }}
-
+with txns as (
+    select *
+    from {{ ref('stg_cdc__payment_transactions') }}
     {% if is_incremental() %}
-    where __source_ts_ms > (
-        select coalesce(MAX(__source_ts_ms), 0)
+    where TIMESTAMP_MILLIS(__source_ts_ms) > (
+        select TIMESTAMP_SUB(MAX(TIMESTAMP_MILLIS(__source_ts_ms)), INTERVAL 1 HOUR)
         from {{ this }}
     )
     {% endif %}
-
 ),
 
-refund_agg as (
-
+refunds_agg as (
     select
         transaction_id,
-        SUM(case when is_completed then refund_amount else 0 end) as total_refunded,
-        COUNT(*)                                                   as refund_count
+        COALESCE(SUM(case when is_completed then refund_amount end), 0) as total_refunded,
+        COUNT(*)                                                        as refund_count
     from {{ ref('stg_pg__payment_refunds') }}
-    group by 1
-
+    group by transaction_id
 ),
 
-user_payment_methods as (
-
+upm as (
     select * from {{ ref('stg_pg__user_payment_methods') }}
-
 ),
 
-method_types as (
-
+pmt as (
     select * from {{ ref('stg_pg__payment_method_types') }}
-
 ),
 
-enriched as (
-
+final as (
     select
         t.transaction_id,
         t.ride_id,
@@ -65,31 +56,33 @@ enriched as (
         t.is_paid,
         t.is_failed,
         t.is_refunded,
+        t.__op,
+        t.__lsn,
+        t.__source_ts_ms,
 
-        {{ get_jakarta_date('t.created_at') }}              as txn_date,
+        -- date dimension
+        {{ get_jakarta_date('t.created_at') }}          as txn_date,
 
-        IFNULL(ra.total_refunded, 0)                        as total_refunded,
-        IFNULL(ra.refund_count, 0)                          as refund_count,
-        t.amount - IFNULL(ra.total_refunded, 0)             as net_amount,
+        -- refund aggregates
+        COALESCE(r.total_refunded, 0)                   as total_refunded,
+        COALESCE(r.refund_count, 0)                     as refund_count,
+        t.amount - COALESCE(r.total_refunded, 0)        as net_amount,
 
-        upm.user_id,
+        -- payment method details
         upm.payment_method_type_id,
+        upm.provider_name                               as method_provider_name,
         upm.masked_account,
-        upm.is_default                                      as is_default_payment_method,
+        upm.is_default,
         upm.payment_method_status,
 
-        mt.method_code,
-        mt.method_name,
+        -- method type details
+        pmt.method_code,
+        pmt.method_name                                 as method_type_name
 
-        t.__source_ts_ms,
-        t.__op,
-        t.__lsn
-
-    from transactions    t
-    left join refund_agg ra  on t.transaction_id           = ra.transaction_id
-    left join user_payment_methods upm on t.user_payment_method_id = upm.user_payment_method_id
-    left join method_types mt           on upm.payment_method_type_id = mt.payment_method_type_id
-
+    from txns t
+    left join refunds_agg r  on t.transaction_id = r.transaction_id
+    left join upm            on t.user_payment_method_id = upm.user_payment_method_id
+    left join pmt            on upm.payment_method_type_id = pmt.payment_method_type_id
 )
 
-select * from enriched
+select * from final

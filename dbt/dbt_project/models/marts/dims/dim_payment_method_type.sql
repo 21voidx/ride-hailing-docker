@@ -1,18 +1,8 @@
-{{
-    config(
-        materialized='table',
-        tags=['daily']
-    )
-}}
-
-with method_types as (
-
+with source as (
     select * from {{ ref('stg_pg__payment_method_types') }}
-
 ),
 
 final as (
-
     select
         payment_method_type_id,
         method_code,
@@ -20,9 +10,7 @@ final as (
         is_active,
         created_at,
         updated_at
-
-    from method_types
-
+    from source
 )
 
 select * from final

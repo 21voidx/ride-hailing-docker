@@ -1,9 +1,12 @@
+-- Append-only CDC event log for rides.
+-- JANGAN filter __op = 'd' — log harus utuh.
 with source as (
-    select * from {{ source('dev_bronze_cdc_current', 'ride') }}
-    where __op != 'd'
+    select *
+    from {{ source('dev_bronze_cdc_events', 'ride_events') }}
+    where {{ cdc_partition_filter(days_back=30) }}
 ),
 
-cast_ts as (
+final as (
     select
         cast(ride_id as INT64)                                  as ride_id,
         cast(rider_id as INT64)                                 as rider_id,
@@ -30,13 +33,6 @@ cast_ts as (
         cast(__lsn as INT64)                                    as __lsn,
         cast(__source_ts_ms as INT64)                           as __source_ts_ms
     from source
-),
-
-final as (
-    select
-        *,
-        {{ get_jakarta_date('requested_at') }}                  as ride_date
-    from cast_ts
 )
 
 select * from final

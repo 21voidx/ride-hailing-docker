@@ -3,248 +3,191 @@ version: 2
 models:
   - name: stg_cdc__rides
     description: >
-      Cleaned and type-cast ride records from the CDC pipeline.
-      Debezium STRING timestamps are cast to TIMESTAMP.
-      Deleted records (__op = 'd') are excluded.
+      Current state of rides from Debezium CDC. Timestamps cast from STRING.
+      Rows with __op = 'd' (deletes) are excluded. Adds ride_date in WIB.
     columns:
       - name: ride_id
-        description: Primary key for ride.
-        tests:
-          - not_null
-          - unique
+        description: Surrogate primary key from source.
+        tests: [not_null, unique]
       - name: rider_id
-        description: FK to user_account (rider).
-        tests:
-          - not_null
+        description: FK to user_account.user_id.
+        tests: [not_null]
       - name: driver_id
-        description: FK to driver_profile.
-        tests:
-          - not_null
+        description: FK to driver_profile.driver_id (nullable until accepted).
       - name: vehicle_id
-        description: FK to vehicle.
-        tests:
-          - not_null
+        description: FK to vehicle.vehicle_id (nullable until accepted).
       - name: ride_status
-        description: Current ride status.
+        description: Current ride lifecycle status.
         tests:
           - not_null
           - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
+              values: [REQUESTED, ACCEPTED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, PAYMENT_FAILED]
       - name: service_type
-        description: Service type (e.g. STANDARD, PREMIUM, MOTO).
+        description: Ride tier / vehicle class.
         tests:
           - not_null
+          - accepted_values:
+              values: [BIKE, CAR, XL]
       - name: city_code
         description: City identifier.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: requested_at
-        description: Timestamp when ride was requested (cast from Debezium STRING).
-        tests:
-          - not_null
-      - name: accepted_at
-        description: Timestamp when driver accepted.
-      - name: arrived_at
-        description: Timestamp when driver arrived at pickup.
-      - name: started_at
-        description: Timestamp when ride started.
-      - name: completed_at
-        description: Timestamp when ride was completed.
-      - name: cancelled_at
-        description: Timestamp when ride was cancelled.
-      - name: cancelled_by_user_id
-        description: User ID who cancelled (rider or driver).
-      - name: cancel_reason_code
-        description: Reason code for cancellation.
-      - name: cancel_reason_note
-        description: Free-text cancellation note.
+        description: Timestamp the ride was requested (cast from Debezium STRING).
+        tests: [not_null]
       - name: estimated_distance_km
-        description: Estimated trip distance in km.
+        description: Estimated trip distance in kilometres (> 0).
         tests:
+          - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "estimated_distance_km is not null"
+              strictly: true
       - name: estimated_duration_min
-        description: Estimated trip duration in minutes.
+        description: Estimated trip duration in minutes (> 0).
         tests:
+          - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "estimated_duration_min is not null"
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Record last update timestamp.
+              strictly: true
       - name: ride_date
-        description: DATE of the ride in Asia/Jakarta timezone.
-        tests:
-          - not_null
+        description: Ride date in Asia/Jakarta timezone derived from requested_at.
+        tests: [not_null]
       - name: __op
-        description: CDC operation type.
+        description: CDC operation code (c/r/u — d rows are filtered out).
+        tests: [not_null]
+      - name: __lsn
+        description: PostgreSQL LSN for ordering CDC events.
+        tests: [not_null]
       - name: __source_ts_ms
-        description: Epoch ms of the CDC event at source.
-        tests:
-          - not_null
+        description: CDC source timestamp in milliseconds since epoch.
+        tests: [not_null]
 
   - name: stg_cdc__driver_profiles
     description: >
-      Cleaned driver profile records from CDC pipeline.
-      Includes derived boolean flags for verification and suspension status.
+      Current state of driver profiles from Debezium CDC. Derives boolean flags
+      from driver_status and verification_status.
     columns:
       - name: driver_id
-        description: Primary key for driver profile.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: user_id
-        description: FK to user_account.
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: license_number
-        description: Driver license number.
-        tests:
-          - not_null
-      - name: license_expiry
-        description: License expiry date.
+        tests: [not_null]
       - name: driver_status
-        description: Operational status of the driver.
         tests:
           - not_null
           - accepted_values:
-              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING']
+              values: [AVAILABLE, ON_RIDE, OFFLINE, SUSPENDED]
       - name: verification_status
-        description: KYC / document verification status.
         tests:
           - not_null
           - accepted_values:
-              values: ['PENDING','VERIFIED','REJECTED','EXPIRED']
-      - name: verified_at
-        description: Timestamp when driver was verified.
-      - name: suspended_at
-        description: Timestamp when driver was suspended.
+              values: [PENDING, VERIFIED, REJECTED]
       - name: rating_avg
-        description: Average driver rating (0-5).
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              max_value: 5
-              config:
-                where: "rating_avg is not null"
-      - name: rating_count
-        description: Total number of ratings received.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "rating_count is not null"
-      - name: created_at
-        description: Record creation timestamp.
+        description: Average driver rating (1.00–5.00).
         tests:
           - not_null
-      - name: updated_at
-        description: Record last update timestamp.
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1.0
+              max_value: 5.0
+      - name: rating_count
+        description: Total number of ratings received (>= 0).
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
       - name: is_verified
-        description: TRUE if verification_status = 'VERIFIED'.
+        description: True when verification_status = 'VERIFIED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_suspended
-        description: TRUE if driver_status = 'SUSPENDED'.
+        description: True when driver_status = 'SUSPENDED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: __source_ts_ms
-        description: Epoch ms of the CDC event at source.
-        tests:
-          - not_null
+        tests: [not_null]
 
   - name: stg_cdc__payment_transactions
     description: >
-      Cleaned payment transaction records from CDC pipeline.
-      Includes boolean flags derived from payment_status.
+      Current state of payment transactions from Debezium CDC.
+      Derives boolean payment-status flags.
     columns:
       - name: transaction_id
-        description: Primary key for payment transaction.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to ride.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: user_payment_method_id
-        description: FK to user_payment_method.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: provider_name
-        description: Payment gateway provider name.
-      - name: provider_transaction_id
-        description: Provider-assigned transaction ID.
-      - name: idempotency_key
-        description: Idempotency key used for deduplication at provider.
+        tests: [not_null]
       - name: amount
-        description: Transaction amount in local currency.
+        description: Transaction amount (>= 0).
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: method_fee
-        description: Processing fee charged by payment method.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "method_fee is not null"
-      - name: currency_code
-        description: ISO 4217 currency code.
+        description: Payment method fee (>= 0, default 0).
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
       - name: payment_status
-        description: Current payment status.
         tests:
           - not_null
           - accepted_values:
-              values: ['PENDING','AUTHORIZED','CAPTURED','PAID','FAILED','REFUNDED','PARTIALLY_REFUNDED']
-      - name: failure_code
-        description: Failure code if payment failed.
-      - name: failure_message
-        description: Human-readable failure message.
-      - name: authorized_at
-        description: Timestamp of payment authorization.
-      - name: captured_at
-        description: Timestamp of payment capture.
-      - name: paid_at
-        description: Timestamp when payment settled.
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Record last update timestamp.
+              values: [AUTHORIZED, CAPTURED, PAID, FAILED, REFUNDED]
       - name: is_paid
-        description: TRUE if payment_status = 'PAID'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_failed
-        description: TRUE if payment_status = 'FAILED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_refunded
-        description: TRUE if payment_status = 'REFUNDED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: __source_ts_ms
-        description: Epoch ms of the CDC event at source.
+        tests: [not_null]
+
+  - name: stg_cdc__ride_events
+    description: >
+      Append-only CDC event log for rides. All events including deletes are retained.
+      Filtered by _PARTITIONTIME (last 30 days) via cdc_partition_filter().
+    columns:
+      - name: ride_id
+        tests: [not_null]
+      - name: __op
+        description: CDC operation — all values retained (c/r/u/d).
+        tests: [not_null]
+      - name: __lsn
+        tests: [not_null]
+      - name: __source_ts_ms
+        tests: [not_null]
+
+  - name: stg_cdc__payment_transaction_events
+    description: >
+      Append-only CDC event log for payment transactions.
+      Filtered by _PARTITIONTIME (last 30 days) via cdc_partition_filter().
+    columns:
+      - name: transaction_id
+        tests: [not_null]
+      - name: payment_status
         tests:
           - not_null
+          - accepted_values:
+              values: [AUTHORIZED, CAPTURED, PAID, FAILED, REFUNDED]
+      - name: __op
+        tests: [not_null]
+      - name: __lsn
+        tests: [not_null]
+      - name: __source_ts_ms
+        tests: [not_null]

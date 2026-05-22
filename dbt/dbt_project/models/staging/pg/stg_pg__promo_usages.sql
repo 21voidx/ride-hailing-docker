@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'promo_usage') }}
-
+    select * from {{ source('dev_bronze_pg', 'promo_usage') }}
 ),
 
-renamed as (
-
+final as (
     select
         promo_usage_id,
         promotion_id,
@@ -13,12 +10,8 @@ renamed as (
         rider_id,
         discount_amount_applied,
         used_at,
-        created_at,
-        _ingested_at,
-        _source_system
-
+        created_at
     from source
-
 )
 
-select * from renamed
+select * from final

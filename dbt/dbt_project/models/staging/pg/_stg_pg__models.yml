@@ -2,649 +2,393 @@ version: 2
 
 models:
   - name: stg_pg__users
-    description: Cleaned user accounts from PostgreSQL batch pipeline.
+    description: >
+      User accounts (riders and drivers). Excludes password_hash.
+      Adds signup_date in Asia/Jakarta timezone.
     columns:
       - name: user_id
-        description: Primary key from source.
-        tests:
-          - not_null
-          - unique
-      - name: rider_id
-        description: Alias of user_id to indicate rider context.
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: username
-        description: Unique username.
-        tests:
-          - not_null
-      - name: email
-        description: User email address.
-      - name: phone_number
-        description: User phone number.
+        tests: [not_null, unique]
       - name: account_status
-        description: Status of the user account.
         tests:
           - not_null
           - accepted_values:
-              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING','DELETED']
-      - name: email_verified_at
-        description: Timestamp when email was verified.
-      - name: phone_verified_at
-        description: Timestamp when phone was verified.
-      - name: last_login_at
-        description: Timestamp of last login.
+              values: [ACTIVE, SUSPENDED, DELETED]
       - name: created_at
-        description: Account creation timestamp.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: updated_at
-        description: Last update timestamp.
-      - name: deleted_at
-        description: Soft-delete timestamp.
+        tests: [not_null]
       - name: signup_date
-        description: DATE of signup in Asia/Jakarta timezone.
-        tests:
-          - not_null
-      - name: cohort_month
-        description: First day of the signup month (DATE_TRUNC MONTH).
-        tests:
-          - not_null
+        tests: [not_null]
 
   - name: stg_pg__vehicles
-    description: Cleaned vehicle records from PostgreSQL batch pipeline.
+    description: Registered vehicles. Adds is_active boolean from vehicle_status.
     columns:
       - name: vehicle_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: license_plate
-        description: Vehicle license plate.
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: vehicle_make
-        description: Manufacturer name.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: vehicle_model
-        description: Model name.
+        tests: [not_null]
+      - name: vehicle_type
         tests:
           - not_null
+          - accepted_values:
+              values: [BIKE, CAR, XL]
+      - name: vehicle_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: [ACTIVE, INACTIVE, SUSPENDED]
       - name: vehicle_year
-        description: Manufacturing year.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 2000
-              max_value: 2030
+              max_value: 2035
       - name: vehicle_capacity
-        description: Passenger capacity.
         tests:
           - not_null
-      - name: vehicle_color
-        description: Color of the vehicle.
-      - name: vehicle_type
-        description: Type classification (SEDAN, SUV, MOTO, etc.).
-        tests:
-          - not_null
-      - name: vehicle_status
-        description: Current operational status.
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['ACTIVE','INACTIVE','SUSPENDED','PENDING_REVIEW']
-      - name: verified_at
-        description: Timestamp when vehicle was verified.
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
-      - name: deleted_at
-        description: Soft-delete timestamp.
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 12
       - name: is_active
-        description: TRUE if vehicle_status = 'ACTIVE'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__driver_documents
-    description: KYC and compliance documents per driver.
+    description: Driver KYC documents. Derives is_verified and is_expired booleans.
     columns:
       - name: document_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: driver_id
-        description: FK to driver_profile.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_cdc__driver_profiles')
+              field: driver_id
       - name: document_type
-        description: Type of document (SIM, KTP, STNK, etc.).
-        tests:
-          - not_null
-      - name: document_number
-        description: Document identifier number.
-        tests:
-          - not_null
-      - name: verification_status
-        description: Document verification status.
         tests:
           - not_null
           - accepted_values:
-              values: ['PENDING','VERIFIED','REJECTED','EXPIRED']
+              values: [KTP, SIM, STNK, SKCK]
+      - name: document_number
+        tests: [not_null]
+      - name: verification_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: [PENDING, VERIFIED, REJECTED]
       - name: submitted_at
-        description: Timestamp of document submission.
-        tests:
-          - not_null
-      - name: verified_at
-        description: Timestamp of verification.
-      - name: verified_by
-        description: User ID who verified the document.
-      - name: expires_at
-        description: Document expiry date.
-      - name: rejection_reason
-        description: Reason for rejection if applicable.
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
+        tests: [not_null]
       - name: is_verified
-        description: TRUE if verification_status = 'VERIFIED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_expired
-        description: TRUE if expires_at < CURRENT_DATE.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__driver_vehicle_assignments
-    description: Driver-to-vehicle assignment records.
+    description: >
+      Driver-vehicle assignment periods. Adds is_currently_active
+      (is_active AND no end date or future end date).
     columns:
       - name: assignment_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: driver_id
-        description: FK to driver_profile.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_cdc__driver_profiles')
+              field: driver_id
       - name: vehicle_id
-        description: FK to vehicle.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__vehicles')
+              field: vehicle_id
       - name: assigned_from
-        description: Start of assignment period.
-        tests:
-          - not_null
-      - name: assigned_to
-        description: End of assignment period (NULL if currently active).
+        tests: [not_null]
       - name: is_active
-        description: Assignment active flag from source.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
       - name: is_currently_active
-        description: TRUE if is_active = TRUE and assigned_to IS NULL.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__ride_fares
-    description: Final fare records only (fare_type = 'FINAL').
+    description: >
+      Fare records for rides — all types (ESTIMATED, FINAL, ADJUSTED) are kept.
+      Business filter to FINAL rows happens in int__ride_enriched.
     columns:
       - name: fare_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to ride.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: fare_type
-        description: Always 'FINAL' in this model.
         tests:
           - not_null
           - accepted_values:
-              values: ['FINAL']
+              values: [ESTIMATED, FINAL, ADJUSTED]
       - name: fare_version
-        description: Fare calculation version number.
         tests:
           - not_null
-      - name: currency_code
-        description: ISO currency code.
-        tests:
-          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              strictly: true
       - name: distance_km
-        description: Actual trip distance in km.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
+              strictly: true
       - name: duration_min
-        description: Actual trip duration in minutes.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
+              strictly: true
       - name: base_fare
-        description: Base fare amount.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: distance_fare
-        description: Distance-based fare component.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: time_fare
-        description: Time-based fare component.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: surge_multiplier
-        description: Surge pricing multiplier.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 1
       - name: surge_amount
-        description: Additional charge from surge pricing.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: discount_amount
-        description: Discount applied to fare.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: tax_amount
-        description: Tax component.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: platform_fee
-        description: Platform service fee.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: driver_earning
-        description: Driver payout amount.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: total_fare
-        description: Total fare charged to rider.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-      - name: total_fare_before_discount
-        description: Sum of base, distance, time, and surge fares before discount.
-        tests:
-          - not_null
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-      - name: fare_rule_code
-        description: Pricing rule applied.
-        tests:
-          - not_null
       - name: calculated_at
-        description: Timestamp of fare calculation.
-        tests:
-          - not_null
+        tests: [not_null]
 
   - name: stg_pg__ride_fare_components
-    description: Line-item fare components linked to a fare record.
+    description: Itemised components of each fare record.
     columns:
       - name: fare_component_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: fare_id
-        description: FK to ride_fare.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__ride_fares')
+              field: fare_id
       - name: component_code
-        description: Component identifier code.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: component_name
-        description: Human-readable component name.
+        tests: [not_null]
+      - name: component_amount
+        tests: [not_null]
+
+  - name: stg_pg__ride_locations
+    description: >
+      Pickup and dropoff location records — one row per location_type per ride.
+      Pivoting (to pickup_lat/lng, dropoff_lat/lng) happens in int__ride_enriched.
+    columns:
+      - name: ride_location_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null]
+      - name: location_type
         tests:
           - not_null
-      - name: component_amount
-        description: Amount for this fare component.
+          - accepted_values:
+              values: [PICKUP_REQUESTED, DROPOFF_REQUESTED, PICKUP_ACTUAL, DROPOFF_ACTUAL]
+      - name: latitude
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-      - name: created_at
-        description: Record creation timestamp.
+              min_value: -90
+              max_value: 90
+      - name: longitude
         tests:
           - not_null
-
-  - name: stg_pg__ride_locations
-    description: Pivoted ride location data with pickup and dropoff columns.
-    columns:
-      - name: ride_id
-        description: Primary key (one row per ride).
-        tests:
-          - not_null
-          - unique
-      - name: pickup_latitude
-        description: Requested pickup latitude.
-      - name: pickup_longitude
-        description: Requested pickup longitude.
-      - name: pickup_address
-        description: Requested pickup address text.
-      - name: pickup_place_id
-        description: Requested pickup place identifier.
-      - name: dropoff_latitude
-        description: Requested dropoff latitude.
-      - name: dropoff_longitude
-        description: Requested dropoff longitude.
-      - name: dropoff_address
-        description: Requested dropoff address text.
-      - name: dropoff_place_id
-        description: Requested dropoff place identifier.
-      - name: pickup_actual_latitude
-        description: Actual pickup latitude (where driver picked up).
-      - name: pickup_actual_longitude
-        description: Actual pickup longitude.
-      - name: pickup_actual_address
-        description: Actual pickup address.
-      - name: dropoff_actual_latitude
-        description: Actual dropoff latitude.
-      - name: dropoff_actual_longitude
-        description: Actual dropoff longitude.
-      - name: dropoff_actual_address
-        description: Actual dropoff address.
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -180
+              max_value: 180
+      - name: captured_at
+        tests: [not_null]
 
   - name: stg_pg__ride_status_history
-    description: Immutable log of ride status transitions.
+    description: Ride lifecycle status transition log. Adds changed_date in WIB.
     columns:
       - name: ride_status_history_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to ride.
-        tests:
-          - not_null
-      - name: old_status
-        description: Status before this transition.
-        tests:
-          - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
-              config:
-                where: "old_status is not null"
+        tests: [not_null]
       - name: new_status
-        description: Status after this transition.
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
-      - name: changed_by_user_id
-        description: User who triggered the change.
-      - name: reason_code
-        description: Reason code for the transition.
-      - name: reason_note
-        description: Free-text reason.
+        tests: [not_null]
       - name: changed_at
-        description: Timestamp of the status change.
-        tests:
-          - not_null
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: changed_date
-        description: DATE of status change in Asia/Jakarta timezone.
-        tests:
-          - not_null
+        tests: [not_null]
 
   - name: stg_pg__reviews
-    description: Rider and driver reviews per ride. Soft-deleted records excluded.
+    description: Rider-to-driver and driver-to-rider reviews.
     columns:
       - name: review_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to ride.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: reviewer_id
-        description: FK to user_account (reviewer).
-        tests:
-          - not_null
+        tests: [not_null]
       - name: reviewee_id
-        description: FK to user_account (person being reviewed).
-        tests:
-          - not_null
+        tests: [not_null]
       - name: review_type
-        description: Direction of review (RIDER_TO_DRIVER or DRIVER_TO_RIDER).
         tests:
           - not_null
           - accepted_values:
-              values: ['RIDER_TO_DRIVER','DRIVER_TO_RIDER']
+              values: [RIDER_TO_DRIVER, DRIVER_TO_RIDER]
       - name: rating_score
-        description: Rating score (1–5).
+        description: Rating 1–5.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 1
               max_value: 5
-      - name: comments
-        description: Optional free-text review comment.
-      - name: created_at
-        description: Review creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
       - name: review_date
-        description: DATE of review in Asia/Jakarta timezone.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: is_positive
-        description: TRUE if rating_score >= 4.
-        tests:
-          - not_null
-          - accepted_values:
-              values: [true, false]
-      - name: has_comment
-        description: TRUE if a non-empty comment was provided.
+        description: True when rating_score >= 4.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__promotions
-    description: Promotion definitions with current validity flag.
+    description: Promotion definitions. Adds is_currently_valid derived boolean.
     columns:
       - name: promotion_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: promo_code
-        description: Unique promo code string.
-        tests:
-          - not_null
-      - name: promo_description
-        description: Human-readable description.
+        tests: [not_null, unique]
       - name: discount_type
-        description: Type of discount (PERCENTAGE or FIXED).
         tests:
           - not_null
           - accepted_values:
-              values: ['PERCENTAGE','FIXED']
+              values: [PERCENT, FIXED]
       - name: discount_pct
-        description: Discount percentage (0–100).
+        description: Discount percentage (0–100), nullable for FIXED type.
         tests:
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
               max_value: 100
-              config:
-                where: "discount_pct is not null"
-      - name: discount_amount
-        description: Fixed discount amount.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "discount_amount is not null"
-      - name: max_discount_amount
-        description: Maximum discount cap.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "max_discount_amount is not null"
+              row_condition: "discount_type = 'PERCENT'"
       - name: min_fare_amount
-        description: Minimum fare required to use promo.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-      - name: valid_from
-        description: Promotion validity start timestamp.
-        tests:
-          - not_null
-      - name: valid_to
-        description: Promotion validity end timestamp.
-        tests:
-          - not_null
       - name: promotion_status
-        description: Current status of the promotion.
         tests:
           - not_null
           - accepted_values:
-              values: ['ACTIVE','INACTIVE','EXPIRED','DRAFT']
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
+              values: [ACTIVE, INACTIVE, EXPIRED]
+      - name: valid_from
+        tests: [not_null]
+      - name: valid_to
+        tests: [not_null]
       - name: is_currently_valid
-        description: TRUE if promotion is ACTIVE and within valid date range.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__promo_usages
-    description: Records of promotions applied to rides.
+    description: Per-ride promo application records.
     columns:
       - name: promo_usage_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: promotion_id
-        description: FK to promotion.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__promotions')
+              field: promotion_id
       - name: ride_id
-        description: FK to ride.
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: rider_id
-        description: FK to user_account (rider).
-        tests:
-          - not_null
+        tests: [not_null]
       - name: discount_amount_applied
-        description: Actual discount amount applied to the ride.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: used_at
-        description: Timestamp when promo was applied.
-        tests:
-          - not_null
+        tests: [not_null]
 
   - name: stg_pg__payment_refunds
-    description: Refund records for payment transactions.
+    description: Refund records per payment transaction.
     columns:
       - name: refund_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: transaction_id
-        description: FK to payment_transaction.
-        tests:
-          - not_null
-      - name: provider_refund_id
-        description: Provider-assigned refund ID.
+        tests: [not_null]
       - name: refund_amount
-        description: Amount refunded.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-      - name: currency_code
-        description: ISO currency code.
-        tests:
-          - not_null
       - name: refund_status
-        description: Current refund status.
         tests:
           - not_null
           - accepted_values:
-              values: ['PENDING','PROCESSING','COMPLETED','FAILED']
-      - name: refund_reason_code
-        description: Reason code for refund.
-      - name: refund_reason_note
-        description: Free-text reason note.
+              values: [REQUESTED, COMPLETED, FAILED]
       - name: requested_at
-        description: Timestamp of refund request.
-        tests:
-          - not_null
-      - name: completed_at
-        description: Timestamp when refund was completed.
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
+        tests: [not_null]
       - name: is_completed
-        description: TRUE if refund_status = 'COMPLETED'.
         tests:
           - not_null
           - accepted_values:
@@ -652,117 +396,100 @@ models:
 
   - name: stg_pg__user_payment_methods
     description: >
-      Saved user payment methods. Sensitive fields (provider_customer_id,
-      provider_payment_token) are intentionally excluded. Soft-deleted records removed.
+      Saved payment methods per user.
+      Sensitive fields provider_customer_id and provider_payment_token are excluded.
     columns:
       - name: user_payment_method_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: user_id
-        description: FK to user_account.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__users')
+              field: user_id
       - name: payment_method_type_id
-        description: FK to payment_method_type.
         tests:
           - not_null
-      - name: provider_name
-        description: Payment provider name.
-      - name: masked_account
-        description: Masked account number (last 4 digits or equivalent).
+          - relationships:
+              to: ref('stg_pg__payment_method_types')
+              field: payment_method_type_id
+      - name: payment_method_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: [ACTIVE, EXPIRED, DISABLED]
       - name: expiry_month
-        description: Card expiry month.
+        description: Card expiry month (1–12, nullable for non-card methods).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 12
+              row_condition: "expiry_month is not null"
       - name: expiry_year
-        description: Card expiry year.
+        description: Card expiry year (2024–2045, nullable for non-card methods).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 2024
+              max_value: 2045
+              row_condition: "expiry_year is not null"
       - name: is_default
-        description: TRUE if this is the user's default payment method.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
-      - name: payment_method_status
-        description: Status of the saved payment method.
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['ACTIVE','INACTIVE','EXPIRED','FAILED']
-      - name: created_at
-        description: Record creation timestamp.
-        tests:
-          - not_null
-      - name: updated_at
-        description: Last update timestamp.
 
   - name: stg_pg__payment_method_types
-    description: Lookup table of supported payment method types.
+    description: Lookup table for payment method types (CASH, CARD, EWALLET, BANK_TRANSFER).
     columns:
       - name: payment_method_type_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: method_code
-        description: Unique method code (e.g. GOPAY, OVO, CC_VISA).
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: method_name
-        description: Human-readable method name.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: is_active
-        description: Whether this payment method type is currently available.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__roles
-    description: System role definitions.
+    description: Application role definitions (RIDER, DRIVER, ADMIN).
     columns:
       - name: role_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: role_code
-        description: Unique role code (e.g. RIDER, DRIVER, ADMIN).
-        tests:
-          - not_null
+        tests: [not_null, unique]
       - name: role_name
-        description: Human-readable role name.
-        tests:
-          - not_null
-      - name: description
-        description: Role description.
+        tests: [not_null]
       - name: is_active
-        description: Whether the role is currently active.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
 
   - name: stg_pg__user_roles
-    description: User-to-role assignment records.
+    description: User-to-role assignments. Composite PK on (user_id, role_id).
     columns:
       - name: user_id
-        description: FK to user_account.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__users')
+              field: user_id
       - name: role_id
-        description: FK to role.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_pg__roles')
+              field: role_id
       - name: assigned_at
-        description: Timestamp when role was assigned.
-        tests:
-          - not_null
-      - name: assigned_by
-        description: User ID who assigned the role.
+        tests: [not_null]
       - name: is_active
-        description: Whether this role assignment is currently active.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [user_id, role_id]

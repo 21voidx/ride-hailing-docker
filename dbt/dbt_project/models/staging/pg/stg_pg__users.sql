@@ -1,17 +1,14 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'user_account') }}
-
+    select * from {{ source('dev_bronze_pg', 'user_account') }}
 ),
 
-renamed as (
-
+final as (
     select
         user_id,
-        user_id                                             as rider_id,
         username,
         email,
         phone_number,
+        -- password_hash intentionally excluded
         account_status,
         email_verified_at,
         phone_verified_at,
@@ -19,15 +16,8 @@ renamed as (
         created_at,
         updated_at,
         deleted_at,
-
-        {{ get_jakarta_date('created_at') }}                as signup_date,
-        DATE_TRUNC({{ get_jakarta_date('created_at') }}, MONTH) as cohort_month,
-
-        _ingested_at,
-        _source_system
-
+        {{ get_jakarta_date('created_at') }}     as signup_date
     from source
-
 )
 
-select * from renamed
+select * from final

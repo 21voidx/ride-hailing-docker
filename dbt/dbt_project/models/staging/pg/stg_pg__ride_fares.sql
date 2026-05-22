@@ -1,11 +1,10 @@
+-- Expose ALL fare rows — ESTIMATED, FINAL, ADJUSTED.
+-- Business filter (fare_type = 'FINAL') happens in int__ride_enriched.
 with source as (
-
-    select * from {{ source('bronze_pg', 'ride_fare') }}
-
+    select * from {{ source('dev_bronze_pg', 'ride_fare') }}
 ),
 
-final_fares as (
-
+final as (
     select
         fare_id,
         ride_id,
@@ -26,16 +25,8 @@ final_fares as (
         total_fare,
         fare_rule_code,
         calculated_at,
-        created_at,
-
-        (base_fare + distance_fare + time_fare + surge_amount) as total_fare_before_discount,
-
-        _ingested_at,
-        _source_system
-
+        created_at
     from source
-    where fare_type = 'FINAL'
-
 )
 
-select * from final_fares
+select * from final

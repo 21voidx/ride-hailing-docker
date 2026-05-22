@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'role') }}
-
+    select * from {{ source('dev_bronze_pg', 'role') }}
 ),
 
-renamed as (
-
+final as (
     select
         role_id,
         role_code,
@@ -13,12 +10,8 @@ renamed as (
         description,
         is_active,
         created_at,
-        updated_at,
-        _ingested_at,
-        _source_system
-
+        updated_at
     from source
-
 )
 
-select * from renamed
+select * from final

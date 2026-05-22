@@ -1,49 +1,28 @@
--- Singular test: assert that the sum of fare components per fare_id
--- is approximately equal to the total_fare in fct_rides.
--- Tolerance of 1 IDR is allowed for floating-point rounding differences.
--- A non-empty result indicates a fare reconciliation discrepancy.
-
+-- Assert: sum of fare components per fare_id is within 1 IDR of the total_fare
+-- recorded in fct_rides for FINAL fares (rounding tolerance).
 with component_totals as (
-
     select
-        fc.fare_id,
-        SUM(fc.component_amount) as sum_of_components
-
-    from {{ ref('stg_pg__ride_fare_components') }} fc
-    group by 1
-
+        fare_id,
+        SUM(component_amount) as component_sum
+    from {{ ref('stg_pg__ride_fare_components') }}
+    group by fare_id
 ),
 
-ride_fares as (
-
+final_fares as (
     select
         fare_id,
         ride_id,
         total_fare
-
     from {{ ref('stg_pg__ride_fares') }}
-
-),
-
-comparison as (
-
-    select
-        rf.fare_id,
-        rf.ride_id,
-        rf.total_fare,
-        ct.sum_of_components,
-        ABS(rf.total_fare - ct.sum_of_components) as discrepancy
-
-    from ride_fares rf
-    inner join component_totals ct on rf.fare_id = ct.fare_id
-
+    where fare_type = 'FINAL'
 )
 
 select
-    fare_id,
-    ride_id,
-    total_fare,
-    sum_of_components,
-    discrepancy
-from comparison
-where discrepancy > 1
+    ff.ride_id,
+    ff.fare_id,
+    ff.total_fare,
+    ct.component_sum,
+    ABS(ff.total_fare - ct.component_sum) as diff
+from final_fares ff
+join component_totals ct on ff.fare_id = ct.fare_id
+where ABS(ff.total_fare - ct.component_sum) > 1

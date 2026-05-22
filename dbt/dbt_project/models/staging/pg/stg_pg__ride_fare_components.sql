@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'ride_fare_component') }}
-
+    select * from {{ source('dev_bronze_pg', 'ride_fare_component') }}
 ),
 
-renamed as (
-
+final as (
     select
         fare_component_id,
         fare_id,
@@ -13,12 +10,8 @@ renamed as (
         component_name,
         component_amount,
         description,
-        created_at,
-        _ingested_at,
-        _source_system
-
+        created_at
     from source
-
 )
 
-select * from renamed
+select * from final

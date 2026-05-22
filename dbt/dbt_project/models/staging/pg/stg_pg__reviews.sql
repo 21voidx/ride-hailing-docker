@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'review') }}
-
+    select * from {{ source('dev_bronze_pg', 'review') }}
 ),
 
-renamed as (
-
+final as (
     select
         review_id,
         ride_id,
@@ -17,17 +14,9 @@ renamed as (
         created_at,
         updated_at,
         deleted_at,
-
-        {{ get_jakarta_date('created_at') }}  as review_date,
-        (rating_score >= 4)                   as is_positive,
-        (comments is not null and TRIM(comments) != '') as has_comment,
-
-        _ingested_at,
-        _source_system
-
+        {{ get_jakarta_date('created_at') }}     as review_date,
+        rating_score >= 4                        as is_positive
     from source
-    where deleted_at is null
-
 )
 
-select * from renamed
+select * from final

@@ -1,96 +1,49 @@
 {{
     config(
         materialized='table',
-        tags=['daily'],
-        partition_by={
-            'field': 'usage_date',
-            'data_type': 'date'
-        },
-        cluster_by=['promotion_id']
+        partition_by={'field': 'usage_date', 'data_type': 'date'}
     )
 }}
 
-with fct_rides as (
-
-    select * from {{ ref('fct_rides') }}
-
-),
-
-dim_promotion as (
-
+with rides as (
     select
         promotion_id,
-        promo_code,
-        discount_type,
-        discount_pct,
-        discount_amount,
-        max_discount_amount,
-        min_fare_amount,
-        usage_limit_total,
-        usage_limit_per_user,
-        valid_from,
-        valid_to,
-        promotion_status,
-        is_currently_valid
-
-    from {{ ref('dim_promotion') }}
-
-),
-
-promo_rides as (
-
-    select
-        promotion_id,
-        ride_date                                               as usage_date,
-
-        COUNT(ride_id)                                          as rides_with_promo,
-        COUNT(DISTINCT rider_id)                                as unique_riders,
-
-        SUM(total_promo_discount)                               as total_discount_applied,
-        AVG(total_promo_discount)                               as avg_discount_applied,
-        SUM(total_fare)                                         as gross_fare_with_promo,
-        AVG(total_fare)                                         as avg_fare_with_promo,
-
-        COUNTIF(is_completed)                                   as completed_promo_rides,
-        COUNTIF(is_cancelled)                                   as cancelled_promo_rides,
-
-        SAFE_DIVIDE(COUNTIF(is_completed), COUNT(ride_id))      as promo_completion_rate
-
-    from fct_rides
+        ride_date                                           as usage_date,
+        promo_discount_amount,
+        total_fare,
+        is_completed,
+        rider_id
+    from {{ ref('fct_rides') }}
     where has_promo = true
-    group by 1, 2
-
 ),
 
-final as (
+promotions as (
+    select promotion_id, promo_code, discount_type, discount_pct, discount_amount, promotion_status
+    from {{ ref('dim_promotion') }}
+),
 
+agg as (
     select
-        pr.promotion_id,
-        pr.usage_date,
-
-        dp.promo_code,
-        dp.discount_type,
-        dp.discount_pct,
-        dp.discount_amount,
-        dp.max_discount_amount,
-        dp.valid_from,
-        dp.valid_to,
-        dp.promotion_status,
-        dp.is_currently_valid,
-
-        pr.rides_with_promo,
-        pr.unique_riders,
-        pr.total_discount_applied,
-        pr.avg_discount_applied,
-        pr.gross_fare_with_promo,
-        pr.avg_fare_with_promo,
-        pr.completed_promo_rides,
-        pr.cancelled_promo_rides,
-        pr.promo_completion_rate
-
-    from promo_rides       pr
-    left join dim_promotion dp on pr.promotion_id = dp.promotion_id
-
+        r.promotion_id,
+        r.usage_date,
+        COUNT(*)                                            as usage_count,
+        COUNTIF(r.is_completed)                             as completed_rides_with_promo,
+        COUNT(DISTINCT r.rider_id)                          as unique_riders,
+        COALESCE(SUM(r.promo_discount_amount), 0)           as total_discount_applied,
+        COALESCE(AVG(r.promo_discount_amount), 0)           as avg_discount_per_ride,
+        COALESCE(SUM(r.total_fare), 0)                      as gross_revenue_with_promo
+    from rides r
+    group by r.promotion_id, r.usage_date
 )
 
-select * from final
+select
+    {{ dbt_utils.generate_surrogate_key(['promotion_id', 'usage_date']) }}
+                                                            as agg_key,
+    a.*,
+    p.promo_code,
+    p.discount_type,
+    p.discount_pct,
+    p.discount_amount                                       as promo_discount_flat_amount,
+    p.promotion_status
+from agg a
+left join promotions p on a.promotion_id = p.promotion_id

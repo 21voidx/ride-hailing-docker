@@ -1,9 +1,12 @@
+-- Append-only CDC event log for payment transactions.
+-- JANGAN filter __op = 'd' — log harus utuh.
 with source as (
-    select * from {{ source('dev_bronze_cdc_current', 'payment_transaction') }}
-    where __op != 'd'
+    select *
+    from {{ source('dev_bronze_cdc_events', 'payment_transaction_events') }}
+    where {{ cdc_partition_filter(days_back=30) }}
 ),
 
-cast_ts as (
+final as (
     select
         cast(transaction_id as INT64)                           as transaction_id,
         cast(ride_id as INT64)                                  as ride_id,
@@ -27,15 +30,6 @@ cast_ts as (
         cast(__lsn as INT64)                                    as __lsn,
         cast(__source_ts_ms as INT64)                           as __source_ts_ms
     from source
-),
-
-final as (
-    select
-        *,
-        payment_status = 'PAID'                                 as is_paid,
-        payment_status = 'FAILED'                               as is_failed,
-        payment_status = 'REFUNDED'                             as is_refunded
-    from cast_ts
 )
 
 select * from final

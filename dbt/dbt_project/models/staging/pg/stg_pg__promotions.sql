@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'promotion') }}
-
+    select * from {{ source('dev_bronze_pg', 'promotion') }}
 ),
 
-renamed as (
-
+final as (
     select
         promotion_id,
         promo_code,
@@ -22,18 +19,12 @@ renamed as (
         promotion_status,
         created_at,
         updated_at,
-
         (
             promotion_status = 'ACTIVE'
             and valid_from <= CURRENT_TIMESTAMP()
-            and valid_to   >= CURRENT_TIMESTAMP()
-        ) as is_currently_valid,
-
-        _ingested_at,
-        _source_system
-
+            and valid_to >= CURRENT_TIMESTAMP()
+        )                                        as is_currently_valid
     from source
-
 )
 
-select * from renamed
+select * from final

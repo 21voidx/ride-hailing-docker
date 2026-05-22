@@ -1,64 +1,44 @@
 {{
     config(
-        materialized='incremental',
-        unique_key='rider_id',
-        on_schema_change='sync_all_columns'
+        materialized='table'
     )
 }}
 
-with ride_enriched as (
-
+with rides as (
     select * from {{ ref('int__ride_enriched') }}
-
-    {% if is_incremental() %}
-    where __source_ts_ms > (
-        select coalesce(MAX(last_updated_ts_ms), 0)
-        from {{ this }}
-    )
-    {% endif %}
-
 ),
 
 agg as (
-
     select
-        rider_id,
-
-        COUNT(*)                                                     as total_rides,
-        COUNTIF(is_completed)                                        as completed_rides,
-        COUNTIF(is_cancelled)                                        as cancelled_rides,
-        COUNTIF(has_promo)                                           as promo_rides,
-
-        SUM(case when is_completed then total_fare else 0 end)       as total_spend,
-        AVG(case when is_completed then total_fare end)              as avg_fare,
-
-        MIN(requested_at)                                            as first_ride_at,
-        MAX(requested_at)                                            as last_ride_at,
-
+        rider_id                                                        as user_id,
+        COUNT(*)                                                        as total_rides,
+        COUNTIF(is_completed)                                           as completed_rides,
+        COUNTIF(is_cancelled)                                           as cancelled_rides,
+        COALESCE(SUM(case when is_completed then total_fare end), 0)    as total_spend,
+        MIN(requested_at)                                               as first_ride_at,
+        MAX(requested_at)                                               as last_ride_at,
         DATE_DIFF(
-            CURRENT_DATE('Asia/Jakarta'),
-            MAX(ride_date),
+            CURRENT_DATE(),
+            DATE(MAX(requested_at), 'Asia/Jakarta'),
             DAY
-        )                                                            as days_since_last_ride,
-
+        )                                                               as days_since_last_ride,
+        SAFE_DIVIDE(
+            SUM(case when is_completed then total_fare end),
+            NULLIF(COUNTIF(is_completed), 0)
+        )                                                               as avg_fare,
         (
             select service_type
             from (
                 select service_type, COUNT(*) as cnt
-                from ride_enriched inner_r
-                where inner_r.rider_id = ride_enriched.rider_id
-                  and inner_r.is_completed
-                group by 1
+                from rides r2
+                where r2.rider_id = rides.rider_id and r2.is_completed
+                group by service_type
                 order by cnt desc
                 limit 1
             )
-        )                                                            as favorite_service_type,
-
-        MAX(__source_ts_ms)                                          as last_updated_ts_ms
-
-    from ride_enriched
-    group by 1
-
+        )                                                               as favorite_service_type
+    from rides
+    group by rider_id
 )
 
 select * from agg

@@ -1,117 +1,98 @@
 {{
     config(
         materialized='table',
-        tags=['daily'],
-        partition_by={
-            'field': 'revenue_date',
-            'data_type': 'date'
-        },
-        cluster_by=['city_code', 'service_type']
+        partition_by={'field': 'revenue_date', 'data_type': 'date'}
     )
 }}
 
-with fct_rides as (
-
-    select * from {{ ref('fct_rides') }}
-
-),
-
-fct_payments as (
-
-    select * from {{ ref('fct_payments') }}
-
-),
-
-dim_date as (
-
-    select date_day, is_weekend, is_public_holiday_id, year, quarter, month
-    from {{ ref('dim_date') }}
-
-),
-
-ride_revenue as (
-
+with rides as (
     select
-        ride_date                                               as revenue_date,
         city_code,
         service_type,
-
-        COUNT(ride_id)                                          as total_rides,
-        COUNTIF(is_completed)                                   as completed_rides,
-
-        SUM(case when is_completed then total_fare else 0 end)       as gross_revenue,
-        SUM(case when is_completed then platform_fee else 0 end)     as platform_fee_revenue,
-        SUM(case when is_completed then driver_earning else 0 end)   as driver_payouts,
-        SUM(case when is_completed then surge_amount else 0 end)     as surge_revenue,
-        SUM(case when is_completed then discount_amount else 0 end)  as total_discounts,
-        SUM(case when is_completed then total_promo_discount else 0 end) as promo_discounts,
-        SUM(case when is_completed then tax_amount else 0 end)       as tax_collected,
-
-        AVG(case when is_completed then total_fare end)              as avg_fare,
-        AVG(case when is_completed then surge_multiplier end)        as avg_surge_multiplier
-
-    from fct_rides
-    group by 1, 2, 3
-
+        ride_date,
+        total_fare,
+        platform_fee,
+        driver_earning,
+        has_promo,
+        discount_amount,
+        is_completed
+    from {{ ref('fct_rides') }}
 ),
 
-payment_revenue as (
-
+payments as (
     select
-        txn_date                                                as revenue_date,
+        p.txn_date,
+        p.amount,
+        p.net_amount,
+        p.total_refunded,
+        p.method_fee,
+        p.is_paid,
+        p.is_refunded,
+        r.city_code,
+        r.service_type
+    from {{ ref('fct_payments') }} p
+    left join {{ ref('fct_rides') }} r using (ride_id)
+),
 
-        SUM(amount)                                             as total_txn_amount,
-        SUM(net_amount)                                         as total_net_amount,
-        SUM(total_refunded)                                     as total_refunds,
-        SUM(method_fee)                                         as total_method_fees,
-        COUNTIF(is_paid)                                        as paid_txn_count,
-        COUNTIF(is_refunded)                                    as refunded_txn_count,
-        COUNTIF(is_failed)                                      as failed_txn_count
+ride_agg as (
+    select
+        city_code,
+        service_type,
+        ride_date                                       as revenue_date,
+        COALESCE(SUM(case when is_completed then total_fare end), 0)
+                                                        as gross_revenue,
+        COALESCE(SUM(case when is_completed then platform_fee end), 0)
+                                                        as platform_fee_revenue,
+        COALESCE(SUM(case when is_completed then driver_earning end), 0)
+                                                        as driver_payout,
+        COALESCE(SUM(case when has_promo then discount_amount end), 0)
+                                                        as promo_discount_cost,
+        COUNTIF(is_completed)                           as paid_rides
+    from rides
+    group by city_code, service_type, ride_date
+),
 
-    from fct_payments
-    group by 1
-
+payment_agg as (
+    select
+        city_code,
+        service_type,
+        txn_date                                        as revenue_date,
+        COALESCE(SUM(case when is_paid then net_amount end), 0)
+                                                        as collected_revenue,
+        COALESCE(SUM(case when is_refunded then total_refunded end), 0)
+                                                        as total_refunds,
+        COALESCE(SUM(case when is_paid then method_fee end), 0)
+                                                        as method_fee_cost,
+        COUNTIF(is_paid)                                as paid_txns
+    from payments
+    group by city_code, service_type, txn_date
 ),
 
 final as (
-
     select
-        rr.revenue_date,
-        rr.city_code,
-        rr.service_type,
-
-        d.is_weekend,
-        d.is_public_holiday_id,
-        d.year,
-        d.quarter,
-        d.month,
-
-        rr.total_rides,
-        rr.completed_rides,
-        rr.gross_revenue,
-        rr.platform_fee_revenue,
-        rr.driver_payouts,
-        rr.surge_revenue,
-        rr.total_discounts,
-        rr.promo_discounts,
-        rr.tax_collected,
-        rr.avg_fare,
-        rr.avg_surge_multiplier,
-
-        IFNULL(pr.total_txn_amount, 0)      as total_txn_amount,
-        IFNULL(pr.total_net_amount, 0)      as total_net_amount,
-        IFNULL(pr.total_refunds, 0)         as total_refunds,
-        IFNULL(pr.total_method_fees, 0)     as total_method_fees,
-        IFNULL(pr.paid_txn_count, 0)        as paid_txn_count,
-        IFNULL(pr.refunded_txn_count, 0)    as refunded_txn_count,
-        IFNULL(pr.failed_txn_count, 0)      as failed_txn_count,
-
-        rr.gross_revenue - IFNULL(pr.total_refunds, 0) as net_revenue
-
-    from ride_revenue      rr
-    left join payment_revenue pr on rr.revenue_date = pr.revenue_date
-    left join dim_date        d  on rr.revenue_date = d.date_day
-
+        COALESCE(ra.city_code, pa.city_code)            as city_code,
+        COALESCE(ra.service_type, pa.service_type)      as service_type,
+        COALESCE(ra.revenue_date, pa.revenue_date)      as revenue_date,
+        COALESCE(ra.gross_revenue, 0)                   as gross_revenue,
+        COALESCE(ra.platform_fee_revenue, 0)            as platform_fee_revenue,
+        COALESCE(ra.driver_payout, 0)                   as driver_payout,
+        COALESCE(ra.promo_discount_cost, 0)             as promo_discount_cost,
+        COALESCE(pa.collected_revenue, 0)               as collected_revenue,
+        COALESCE(pa.total_refunds, 0)                   as total_refunds,
+        COALESCE(pa.method_fee_cost, 0)                 as method_fee_cost,
+        COALESCE(ra.gross_revenue, 0)
+            - COALESCE(pa.total_refunds, 0)             as net_revenue,
+        COALESCE(ra.paid_rides, 0)                      as paid_rides,
+        COALESCE(pa.paid_txns, 0)                       as paid_txns
+    from ride_agg ra
+    full outer join payment_agg pa
+               on ra.city_code    = pa.city_code
+              and ra.service_type = pa.service_type
+              and ra.revenue_date = pa.revenue_date
 )
 
-select * from final
+select
+    {{ dbt_utils.generate_surrogate_key(['city_code', 'service_type', 'revenue_date']) }}
+                                                        as agg_key,
+    *
+from final

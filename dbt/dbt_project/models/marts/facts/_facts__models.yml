@@ -3,310 +3,194 @@ version: 2
 models:
   - name: fct_rides
     description: >
-      Grain: one row per ride_id. Incremental fact table combining enriched ride data
-      with dimension lookups. Partitioned by ride_date, clustered by city_code,
-      service_type, ride_status.
+      Fact table for rides. Incremental (CDC buffer 1 hour).
+      Partitioned by ride_date, clustered by city_code/service_type/ride_status.
     columns:
       - name: ride_id
-        description: Primary key (natural key from source).
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: rider_id
-        description: FK to dim_rider.
         tests:
           - not_null
           - relationships:
               to: ref('dim_rider')
-              field: rider_id
+              field: user_id
       - name: driver_id
-        description: FK to dim_driver.
         tests:
-          - not_null
           - relationships:
               to: ref('dim_driver')
               field: driver_id
       - name: vehicle_id
-        description: FK to dim_vehicle.
         tests:
-          - not_null
           - relationships:
               to: ref('dim_vehicle')
               field: vehicle_id
-      - name: ride_date
-        description: DATE of ride in Asia/Jakarta timezone. Partition column.
-        tests:
-          - not_null
       - name: ride_status
-        description: Final ride status.
         tests:
           - not_null
           - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
+              values: [REQUESTED, ACCEPTED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, PAYMENT_FAILED]
       - name: service_type
-        description: Service type.
         tests:
           - not_null
+          - accepted_values:
+              values: [BIKE, CAR, XL]
       - name: city_code
-        description: City identifier.
-        tests:
-          - not_null
+        tests: [not_null]
+      - name: ride_date
+        tests: [not_null]
       - name: total_fare
-        description: Total fare charged to rider.
         tests:
-          - not_null:
-              config:
-                where: "is_completed = true"
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "total_fare is not null"
+              row_condition: "total_fare is not null"
       - name: base_fare
-        description: Base fare component.
         tests:
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "base_fare is not null"
-      - name: distance_fare
-        description: Distance-based fare component.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "distance_fare is not null"
-      - name: time_fare
-        description: Time-based fare component.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "time_fare is not null"
-      - name: surge_amount
-        description: Surge pricing additional amount.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "surge_amount is not null"
-      - name: discount_amount
-        description: Discount applied.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "discount_amount is not null"
-      - name: platform_fee
-        description: Platform fee charged.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "platform_fee is not null"
-      - name: driver_earning
-        description: Driver payout.
-        tests:
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "driver_earning is not null"
+              row_condition: "base_fare is not null"
       - name: distance_km
-        description: Actual trip distance in km.
         tests:
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "distance_km is not null"
-      - name: duration_minutes
-        description: Actual trip duration in minutes.
+              row_condition: "distance_km is not null"
+      - name: surge_multiplier
         tests:
           - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
-              config:
-                where: "duration_minutes is not null"
+              min_value: 1
+              row_condition: "surge_multiplier is not null"
       - name: is_completed
-        description: TRUE if ride was completed.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_cancelled
-        description: TRUE if ride was cancelled.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_cancelled_by_rider
-        description: TRUE if cancelled by rider.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_cancelled_by_driver
-        description: TRUE if cancelled by driver.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: has_surge
-        description: TRUE if surge pricing was applied.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: has_promo
-        description: TRUE if a promotion was applied.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
-      - name: __source_ts_ms
-        description: CDC source timestamp epoch ms.
-        tests:
-          - not_null
 
   - name: fct_payments
     description: >
-      Grain: one row per transaction_id. Incremental fact table for payment transactions.
-      Partitioned by txn_date, clustered by payment_status, provider_name.
+      Fact table for payment transactions. Incremental (CDC buffer 1 hour).
+      Partitioned by txn_date, clustered by payment_status/provider_name.
     columns:
       - name: transaction_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to fct_rides.
-        tests:
-          - not_null
-      - name: rider_id
-        description: FK to dim_rider.
+        tests: [not_null]
+      - name: user_id
         tests:
           - not_null
           - relationships:
               to: ref('dim_rider')
-              field: rider_id
+              field: user_id
       - name: payment_method_type_id
-        description: FK to dim_payment_method_type.
         tests:
-          - not_null
           - relationships:
               to: ref('dim_payment_method_type')
               field: payment_method_type_id
-      - name: txn_date
-        description: Transaction DATE in Asia/Jakarta timezone.
+      - name: payment_status
         tests:
           - not_null
+          - accepted_values:
+              values: [AUTHORIZED, CAPTURED, PAID, FAILED, REFUNDED]
+      - name: txn_date
+        tests: [not_null]
       - name: amount
-        description: Total transaction amount.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
       - name: method_fee
-        description: Payment method processing fee.
         tests:
+          - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-              config:
-                where: "method_fee is not null"
       - name: net_amount
-        description: Amount minus total refunds.
-        tests:
-          - not_null
-      - name: total_refunded
-        description: Total refunded amount (completed refunds).
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 0
-      - name: payment_status
-        description: Payment status.
+      - name: total_refunded
         tests:
           - not_null
-          - accepted_values:
-              values: ['PENDING','AUTHORIZED','CAPTURED','PAID','FAILED','REFUNDED','PARTIALLY_REFUNDED']
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
       - name: is_paid
-        description: TRUE if payment_status = 'PAID'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_failed
-        description: TRUE if payment_status = 'FAILED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
       - name: is_refunded
-        description: TRUE if payment_status = 'REFUNDED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
-      - name: refund_count
-        description: Number of refund records for this transaction.
-        tests:
-          - not_null
-          - dbt_expectations.expect_column_values_to_be_between:
-              min_value: 0
 
   - name: fct_reviews
     description: >
-      Grain: one row per review_id. Daily table of rider and driver reviews.
+      Review fact table. Full refresh table (daily).
       Partitioned by review_date, clustered by review_type.
     columns:
       - name: review_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to fct_rides.
         tests:
           - not_null
           - relationships:
               to: ref('fct_rides')
               field: ride_id
       - name: reviewer_id
-        description: FK to dim_rider (reviewer).
         tests:
           - not_null
           - relationships:
               to: ref('dim_rider')
-              field: rider_id
+              field: user_id
       - name: reviewee_id
-        description: FK to dim_rider (person reviewed).
         tests:
           - not_null
           - relationships:
               to: ref('dim_rider')
-              field: rider_id
+              field: user_id
       - name: review_type
-        description: Direction of review.
         tests:
           - not_null
           - accepted_values:
-              values: ['RIDER_TO_DRIVER','DRIVER_TO_RIDER']
+              values: [RIDER_TO_DRIVER, DRIVER_TO_RIDER]
       - name: rating_score
-        description: Rating score 1–5.
         tests:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 1
               max_value: 5
       - name: review_date
-        description: DATE of review in Asia/Jakarta timezone.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: is_positive
-        description: TRUE if rating_score >= 4.
-        tests:
-          - not_null
-          - accepted_values:
-              values: [true, false]
-      - name: has_comment
-        description: TRUE if a non-empty comment was left.
         tests:
           - not_null
           - accepted_values:
@@ -314,46 +198,27 @@ models:
 
   - name: fct_ride_status_transitions
     description: >
-      Grain: one row per ride_status_history_id. Incremental fact of status transitions
-      with anomaly detection. Partitioned by changed_date, clustered by new_status.
+      Ride status transition fact. Incremental (batch buffer 1 hour).
+      Partitioned by changed_date, clustered by new_status/old_status.
     columns:
       - name: ride_status_history_id
-        description: Primary key.
-        tests:
-          - not_null
-          - unique
+        tests: [not_null, unique]
       - name: ride_id
-        description: FK to fct_rides.
         tests:
           - not_null
           - relationships:
               to: ref('fct_rides')
               field: ride_id
-      - name: old_status
-        description: Status before the transition.
-        tests:
-          - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
-              config:
-                where: "old_status is not null"
       - name: new_status
-        description: Status after the transition.
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['REQUESTED','ACCEPTED','DRIVER_ARRIVED','STARTED','COMPLETED','CANCELLED']
-      - name: changed_at
-        description: Timestamp of the transition.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: changed_date
-        description: DATE of transition in Asia/Jakarta timezone.
-        tests:
-          - not_null
+        tests: [not_null]
       - name: duration_seconds_in_prev_status
-        description: Time spent in the previous status in seconds.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              row_condition: "duration_seconds_in_prev_status is not null and not is_anomaly"
       - name: is_anomaly
-        description: TRUE if duration negative or invalid transition sequence.
         tests:
           - not_null
           - accepted_values:

@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'vehicle') }}
-
+    select * from {{ source('dev_bronze_pg', 'vehicle') }}
 ),
 
-renamed as (
-
+final as (
     select
         vehicle_id,
         license_plate,
@@ -16,18 +13,12 @@ renamed as (
         vehicle_color,
         vehicle_type,
         vehicle_status,
+        vehicle_status = 'ACTIVE'               as is_active,
         verified_at,
         created_at,
         updated_at,
-        deleted_at,
-
-        (vehicle_status = 'ACTIVE')  as is_active,
-
-        _ingested_at,
-        _source_system
-
+        deleted_at
     from source
-
 )
 
-select * from renamed
+select * from final

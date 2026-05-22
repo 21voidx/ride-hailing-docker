@@ -1,11 +1,8 @@
 with source as (
-
-    select * from {{ source('bronze_pg', 'payment_refund') }}
-
+    select * from {{ source('dev_bronze_pg', 'payment_refund') }}
 ),
 
-renamed as (
-
+final as (
     select
         refund_id,
         transaction_id,
@@ -19,14 +16,8 @@ renamed as (
         completed_at,
         created_at,
         updated_at,
-
-        (refund_status = 'COMPLETED') as is_completed,
-
-        _ingested_at,
-        _source_system
-
+        refund_status = 'COMPLETED'              as is_completed
     from source
-
 )
 
-select * from renamed
+select * from final

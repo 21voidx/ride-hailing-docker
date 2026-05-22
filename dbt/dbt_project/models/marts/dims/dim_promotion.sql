@@ -1,18 +1,8 @@
-{{
-    config(
-        materialized='table',
-        tags=['daily']
-    )
-}}
-
-with promotions as (
-
+with source as (
     select * from {{ ref('stg_pg__promotions') }}
-
 ),
 
 final as (
-
     select
         promotion_id,
         promo_code,
@@ -30,9 +20,7 @@ final as (
         is_currently_valid,
         created_at,
         updated_at
-
-    from promotions
-
+    from source
 )
 
 select * from final

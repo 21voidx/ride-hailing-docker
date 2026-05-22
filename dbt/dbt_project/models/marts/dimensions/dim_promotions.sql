@@ -2,7 +2,7 @@
 
 select
     promotion_id,
-    {{ ride_surrogate_key(['promotion_id']) }} as promotion_key,
+    {{ surrogate_key(["'promotion'", 'promotion_id']) }} as promotion_key,
     promo_code,
     promo_description,
     discount_type,

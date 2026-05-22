@@ -2,7 +2,7 @@
 
 select
     vehicle_id,
-    {{ ride_surrogate_key(['vehicle_id']) }} as vehicle_key,
+    {{ surrogate_key(["'vehicle'", 'vehicle_id']) }} as vehicle_key,
     license_plate,
     vehicle_make,
     vehicle_model,

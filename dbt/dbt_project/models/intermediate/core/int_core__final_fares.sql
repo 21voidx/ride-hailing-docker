@@ -2,7 +2,9 @@
 
 select
     fare_id,
+    {{ surrogate_key(["'fare'", 'fare_id']) }} as fare_key,
     ride_id,
+    {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
     fare_type,
     fare_version,
     currency_code,

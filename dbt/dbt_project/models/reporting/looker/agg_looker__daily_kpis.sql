@@ -12,7 +12,9 @@ with base as (
     {% endif %}
 )
 select
+    {{ surrogate_key(["'daily_kpi'", 'requested_date', 'city_code', 'service_type']) }} as daily_kpi_key,
     requested_date,
+    requested_date_key,
     city_code,
     service_type,
     count(*) as requested_rides,
@@ -37,4 +39,4 @@ select
     {{ safe_divide('countif(is_promo_used)', 'count(*)') }} as promo_usage_rate,
     {{ audit_columns() }}
 from base
-group by 1,2,3
+group by 1,2,3,4,5

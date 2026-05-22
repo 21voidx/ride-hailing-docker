@@ -2,8 +2,11 @@
 
 select
     transaction_id,
+    {{ surrogate_key(["'payment_transaction'", 'transaction_id']) }} as payment_transaction_key,
     ride_id,
+    {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
     user_payment_method_id,
+    {{ surrogate_key(["'user_payment_method'", 'user_payment_method_id']) }} as user_payment_method_key,
     provider_name,
     provider_transaction_id,
     idempotency_key,

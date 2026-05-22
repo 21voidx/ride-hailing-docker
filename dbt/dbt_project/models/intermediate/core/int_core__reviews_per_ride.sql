@@ -2,6 +2,7 @@
 
 select
     ride_id,
+    {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
     count(*) as review_count,
     avg(cast(rating_score as numeric)) as avg_rating_score,
     max(if(review_type = 'RIDER_TO_DRIVER', rating_score, null)) as rider_to_driver_rating_score,

@@ -2,8 +2,11 @@
 
 select
     dva.assignment_id,
+    {{ surrogate_key(["'driver_vehicle_assignment'", 'dva.assignment_id']) }} as driver_vehicle_assignment_key,
     dva.driver_id,
+    {{ surrogate_key(["'driver'", 'dva.driver_id']) }} as driver_key,
     dva.vehicle_id,
+    {{ surrogate_key(["'vehicle'", 'dva.vehicle_id']) }} as vehicle_key,
     dva.assigned_from,
     dva.assigned_to,
     dva.is_active,

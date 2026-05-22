@@ -3,6 +3,7 @@
 with ranked as (
     select
         ride_id,
+        {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
         location_type,
         cast(latitude as numeric) as latitude,
         cast(longitude as numeric) as longitude,
@@ -18,6 +19,7 @@ with ranked as (
 )
 select
     ride_id,
+    max(ride_key) as ride_key,
     max(if(location_type = 'PICKUP_REQUESTED', latitude, null)) as pickup_requested_latitude,
     max(if(location_type = 'PICKUP_REQUESTED', longitude, null)) as pickup_requested_longitude,
     max(if(location_type = 'PICKUP_REQUESTED', address_text, null)) as pickup_requested_address,

@@ -2,7 +2,8 @@
 
 select
     d.driver_id,
-    {{ ride_surrogate_key(['d.driver_id']) }} as driver_key,
+    {{ surrogate_key(["'driver'", 'd.driver_id']) }} as driver_key,
+    {{ surrogate_key(["'user'", 'd.user_id']) }} as user_key,
     d.user_id,
     u.account_status,
     d.license_expiry,

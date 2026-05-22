@@ -1,0 +1,39 @@
+selectors:
+  - name: source_freshness
+    description: Run freshness checks for all bronze sources.
+    definition:
+      method: source
+      value: '*'
+
+  - name: staging
+    description: Build staging models only.
+    definition:
+      method: tag
+      value: staging
+
+  - name: intermediate
+    description: Build intermediate transformation models.
+    definition:
+      method: tag
+      value: intermediate
+
+  - name: marts
+    description: Build dimensions and facts.
+    definition:
+      method: tag
+      value: marts
+
+  - name: reporting
+    description: Build Looker-ready reporting models.
+    definition:
+      method: tag
+      value: reporting
+
+  - name: ci
+    description: Build modified nodes and required parents/children for pull-request validation.
+    definition:
+      union:
+        - method: state
+          value: modified+
+        - method: result
+          value: error+

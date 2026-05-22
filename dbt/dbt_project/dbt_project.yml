@@ -21,7 +21,7 @@ vars:
   source_project: dbt-taxi-explore
   batch_bronze_dataset: dev_bronze_pg
   cdc_bronze_dataset: dev_bronze_cdc_events
-  cdc_lookback_hours: 1440        # 60 days. For initial production full-refresh, override to a wider window.
+  cdc_lookback_hours: 720        # 30 days. For initial production full-refresh, override to a wider window.
   incremental_lookback_days: 3
   reporting_start_date: '2026-03-01'
   timezone: Asia/Jakarta

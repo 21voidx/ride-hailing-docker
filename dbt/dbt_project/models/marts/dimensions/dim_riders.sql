@@ -10,7 +10,8 @@ with rider_roles as (
 )
 select
     u.user_id as rider_id,
-    {{ ride_surrogate_key(['u.user_id']) }} as rider_key,
+    {{ surrogate_key(["'rider'", 'u.user_id']) }} as rider_key,
+    {{ surrogate_key(["'user'", 'u.user_id']) }} as user_key,
     u.account_status,
     u.email_hash,
     u.phone_hash,

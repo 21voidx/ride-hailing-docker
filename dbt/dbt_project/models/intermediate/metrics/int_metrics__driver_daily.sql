@@ -17,8 +17,11 @@ with rides as (
     select * from {{ ref('int_core__reviews_per_ride') }}
 )
 select
+    {{ surrogate_key(["'driver_daily'", 'r.requested_date', 'r.driver_id', 'r.service_type']) }} as driver_daily_key,
     r.requested_date,
+    r.requested_date_key,
     r.driver_id,
+    r.driver_key,
     r.service_type,
     count(*) as assigned_rides,
     countif(r.is_completed) as completed_rides,
@@ -36,4 +39,4 @@ left join lifecycle l on r.ride_id = l.ride_id
 left join fares f on r.ride_id = f.ride_id
 left join reviews on r.ride_id = reviews.ride_id
 where r.driver_id is not null
-group by 1,2,3
+group by 1,2,3,4,5,6

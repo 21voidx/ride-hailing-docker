@@ -2,7 +2,7 @@
 
 select
     payment_method_type_id,
-    {{ ride_surrogate_key(['payment_method_type_id']) }} as payment_method_key,
+    {{ surrogate_key(["'payment_method_type'", 'payment_method_type_id']) }} as payment_method_key,
     method_code,
     method_name,
     is_active,

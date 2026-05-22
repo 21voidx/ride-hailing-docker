@@ -5,8 +5,11 @@
 ) }}
 
 select
+    {{ surrogate_key(["'driver_daily_performance'", 'requested_date', 'driver_id', 'service_type']) }} as driver_daily_performance_key,
     requested_date,
+    {{ surrogate_key(["'date'", 'requested_date']) }} as requested_date_key,
     driver_id,
+    {{ surrogate_key(["'driver'", 'driver_id']) }} as driver_key,
     service_type,
     assigned_rides,
     completed_rides,

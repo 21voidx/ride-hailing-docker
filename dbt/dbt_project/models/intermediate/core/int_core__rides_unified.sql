@@ -2,9 +2,13 @@
 
 select
     ride_id,
+    {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
     rider_id,
+    {{ surrogate_key(["'rider'", 'rider_id']) }} as rider_key,
     driver_id,
+    {{ surrogate_key(["'driver'", 'driver_id']) }} as driver_key,
     vehicle_id,
+    {{ surrogate_key(["'vehicle'", 'vehicle_id']) }} as vehicle_key,
     ride_status,
     service_type,
     city_code,
@@ -28,8 +32,10 @@ select
     {{ is_status('ride_status', 'CANCELLED') }} as is_cancelled,
     {{ is_status('ride_status', 'PAYMENT_FAILED') }} as is_payment_failed,
     date(requested_at, '{{ var("timezone", "Asia/Jakarta") }}') as requested_date,
+    {{ surrogate_key(["'date'", "date(requested_at, '" ~ var('timezone', 'Asia/Jakarta') ~ "')"]) }} as requested_date_key,
     extract(hour from datetime(requested_at, '{{ var("timezone", "Asia/Jakarta") }}')) as requested_hour,
     date(completed_at, '{{ var("timezone", "Asia/Jakarta") }}') as completed_date,
+    {{ surrogate_key(["'date'", "date(completed_at, '" ~ var('timezone', 'Asia/Jakarta') ~ "')"]) }} as completed_date_key,
     {{ audit_columns() }}
 from {{ ref('int_cdc__rides_latest') }}
 where not is_deleted

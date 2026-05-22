@@ -6,9 +6,13 @@
 
 select
     p.transaction_id,
+    {{ surrogate_key(["'payment_transaction'", 'p.transaction_id']) }} as payment_transaction_key,
     p.ride_id,
+    {{ surrogate_key(["'ride'", 'p.ride_id']) }} as ride_key,
     p.user_payment_method_id,
+    {{ surrogate_key(["'user_payment_method'", 'p.user_payment_method_id']) }} as user_payment_method_key,
     upm.payment_method_type_id,
+    {{ surrogate_key(["'payment_method_type'", 'upm.payment_method_type_id']) }} as payment_method_key,
     p.provider_name,
     p.provider_transaction_id,
     p.idempotency_key,
@@ -24,6 +28,7 @@ select
     p.created_at,
     p.updated_at,
     date(p.created_at, '{{ var("timezone", "Asia/Jakarta") }}') as payment_created_date,
+    {{ surrogate_key(["'date'", "date(p.created_at, '" ~ var('timezone', 'Asia/Jakarta') ~ "')"]) }} as payment_created_date_key,
     p.is_paid,
     p.is_payment_failed,
     {{ audit_columns() }}

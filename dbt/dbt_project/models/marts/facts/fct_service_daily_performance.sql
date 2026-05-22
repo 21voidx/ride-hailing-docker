@@ -5,7 +5,9 @@
 ) }}
 
 select
+    {{ surrogate_key(["'service_daily_performance'", 'requested_date', 'city_code', 'service_type', 'ride_status']) }} as service_daily_performance_key,
     requested_date,
+    {{ surrogate_key(["'date'", 'requested_date']) }} as requested_date_key,
     city_code,
     service_type,
     ride_status,

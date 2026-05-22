@@ -15,7 +15,9 @@ with rides as (
     select * from {{ ref('int_core__payment_status_per_ride') }}
 )
 select
+    {{ surrogate_key(["'ride_daily_city_service'", 'r.requested_date', 'r.city_code', 'r.service_type', 'r.ride_status']) }} as ride_daily_city_service_key,
     r.requested_date,
+    r.requested_date_key,
     r.city_code,
     r.service_type,
     r.ride_status,
@@ -34,4 +36,4 @@ select
 from rides r
 left join fares f on r.ride_id = f.ride_id
 left join payments p on r.ride_id = p.ride_id
-group by 1,2,3,4
+group by 1,2,3,4,5,6

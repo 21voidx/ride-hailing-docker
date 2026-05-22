@@ -6,7 +6,9 @@
 
 select
     fare_id,
+    {{ surrogate_key(["'fare'", 'fare_id']) }} as fare_key,
     ride_id,
+    {{ surrogate_key(["'ride'", 'ride_id']) }} as ride_key,
     fare_type,
     fare_version,
     currency_code,
@@ -25,6 +27,7 @@ select
     fare_rule_code,
     calculated_at,
     date(calculated_at, '{{ var("timezone", "Asia/Jakarta") }}') as calculated_date,
+    {{ surrogate_key(["'date'", "date(calculated_at, '" ~ var('timezone', 'Asia/Jakarta') ~ "')"]) }} as calculated_date_key,
     created_at,
     {{ audit_columns() }}
 from {{ ref('int_core__final_fares') }}

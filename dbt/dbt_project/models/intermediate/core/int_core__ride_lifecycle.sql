@@ -2,6 +2,7 @@
 
 select
     ride_id,
+    ride_key,
     requested_at,
     accepted_at,
     arrived_at,

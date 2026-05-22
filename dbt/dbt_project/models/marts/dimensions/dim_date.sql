@@ -6,6 +6,7 @@ with date_spine as (
 )
 select
     date_day as date_key,
+    {{ surrogate_key(["'date'", 'date_day']) }} as date_surrogate_key,
     date_day,
     extract(year from date_day) as year_number,
     extract(quarter from date_day) as quarter_number,

@@ -3,7 +3,7 @@
 with source as (
     select *
     from {{ source('dev_bronze_cdc_events', 'payment_transaction_events') }}
-    where {{ cdc_partition_filter(days_back=30) }}
+    where {{ cdc_partition_filter(days_back=60) }}
 ),
 
 final as (

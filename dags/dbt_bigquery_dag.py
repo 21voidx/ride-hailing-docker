@@ -179,6 +179,18 @@ def taxi_dbt_bigquery() -> None:
         command_body="dbt debug ${DBT_COMMON_FLAGS}",
     )
 
+    dbt_seed = _dbt_task(
+        task_id="dbt_seed",
+        command_body="""
+dbt seed \
+${DBT_COMMON_FLAGS} \
+${DBT_THREADS_FLAG} \
+${DBT_VARS_FLAG} \
+${FULL_REFRESH_FLAG}
+""",
+        retries=2,
+    )
+
     dbt_build_staging = _dbt_task(
         task_id="dbt_build_staging",
         command_body="""
@@ -228,6 +240,7 @@ dbt build \
     (
         dbt_deps 
         >> dbt_debug 
+        >> dbt_seed
         >> dbt_build_staging 
         >> dbt_build_intermediate 
         >> dbt_build_marts 

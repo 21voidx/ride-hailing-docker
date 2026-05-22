@@ -1,35 +1,26 @@
--- Append-only CDC event log for payment transactions.
--- JANGAN filter __op = 'd' — log harus utuh.
-with source as (
-    select *
-    from {{ source('dev_bronze_cdc_events', 'payment_transaction_events') }}
-    where {{ cdc_partition_filter(days_back=60) }}
-),
-
-final as (
-    select
-        cast(transaction_id as INT64)                           as transaction_id,
-        cast(ride_id as INT64)                                  as ride_id,
-        cast(user_payment_method_id as INT64)                   as user_payment_method_id,
-        provider_name,
-        provider_transaction_id,
-        idempotency_key,
-        cast(amount as NUMERIC)                                 as amount,
-        cast(method_fee as NUMERIC)                             as method_fee,
-        currency_code,
-        payment_status,
-        failure_code,
-        failure_message,
-        {{ cast_debezium_timestamp('authorized_at') }}          as authorized_at,
-        {{ cast_debezium_timestamp('captured_at') }}            as captured_at,
-        {{ cast_debezium_timestamp('paid_at') }}                as paid_at,
-        {{ cast_debezium_timestamp('created_at') }}             as created_at,
-        {{ cast_debezium_timestamp('updated_at') }}             as updated_at,
-        __op,
-        __table,
-        cast(__lsn as INT64)                                    as __lsn,
-        cast(__source_ts_ms as INT64)                           as __source_ts_ms
-    from source
-)
-
-select * from final
+select
+    cast(transaction_id as int64) as transaction_id,
+    cast(ride_id as int64) as ride_id,
+    cast(user_payment_method_id as int64) as user_payment_method_id,
+    provider_name,
+    provider_transaction_id,
+    idempotency_key,
+    cast(amount as numeric) as amount,
+    cast(method_fee as numeric) as method_fee,
+    upper(currency_code) as currency_code,
+    upper(payment_status) as payment_status,
+    upper(failure_code) as failure_code,
+    failure_message,
+    {{ safe_parse_cdc_timestamp('authorized_at') }} as authorized_at,
+    {{ safe_parse_cdc_timestamp('captured_at') }} as captured_at,
+    {{ safe_parse_cdc_timestamp('paid_at') }} as paid_at,
+    {{ safe_parse_cdc_timestamp('created_at') }} as created_at,
+    {{ safe_parse_cdc_timestamp('updated_at') }} as updated_at,
+    lower(__op) as cdc_operation,
+    __table as cdc_table,
+    cast(__lsn as int64) as cdc_lsn,
+    timestamp_millis(cast(__source_ts_ms as int64)) as cdc_event_at,
+    _partitiontime as cdc_partition_at,
+    {{ audit_columns() }}
+from {{ source('bronze_cdc_events', 'payment_transaction_events') }}
+where _partitiontime >= timestamp_sub(current_timestamp(), interval {{ var('cdc_lookback_hours', 720) }} hour)

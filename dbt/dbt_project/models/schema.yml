@@ -1,0 +1,500 @@
+version: 2
+
+models:
+  - name: stg_cdc__ride_events
+    description: Cleaned CDC event stream for rides with safe timestamp parsing and partition lookback filtering.
+    columns:
+      - name: ride_id
+        tests: [not_null]
+      - name: ride_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: service_type
+        tests:
+          - accepted_values:
+              values: ['BIKE','CAR','XL']
+      - name: cdc_operation
+        tests:
+          - accepted_values:
+              values: ['c','r','u','d']
+
+  - name: stg_cdc__driver_profile_events
+    description: Cleaned CDC event stream for driver profiles.
+    columns:
+      - name: driver_id
+        tests: [not_null]
+      - name: driver_status
+        tests:
+          - accepted_values:
+              values: ['AVAILABLE','ON_RIDE','OFFLINE','SUSPENDED']
+      - name: verification_status
+        tests:
+          - accepted_values:
+              values: ['PENDING','VERIFIED','REJECTED']
+
+  - name: stg_cdc__payment_transaction_events
+    description: Cleaned CDC event stream for payment transactions.
+    columns:
+      - name: transaction_id
+        tests: [not_null]
+      - name: payment_status
+        tests:
+          - accepted_values:
+              values: ['AUTHORIZED','CAPTURED','PAID','FAILED','REFUNDED']
+
+  - name: stg_pg__ride_status_history
+    description: Staging model for ride status transitions.
+    columns:
+      - name: ride_status_history_id
+        tests: [not_null, unique]
+      - name: new_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+
+  - name: stg_pg__ride_locations
+    description: Staging model for requested and actual ride locations.
+    columns:
+      - name: ride_location_id
+        tests: [not_null, unique]
+      - name: location_type
+        tests:
+          - accepted_values:
+              values: ['PICKUP_REQUESTED','DROPOFF_REQUESTED','PICKUP_ACTUAL','DROPOFF_ACTUAL']
+
+  - name: stg_pg__ride_tracking_points
+    description: Staging model for ride GPS tracking points.
+    columns:
+      - name: tracking_point_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null]
+
+  - name: stg_pg__ride_fares
+    description: Staging model for ride fare headers.
+    columns:
+      - name: fare_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null]
+      - name: fare_type
+        tests:
+          - accepted_values:
+              values: ['ESTIMATED','FINAL','ADJUSTED']
+
+  - name: stg_pg__ride_fare_components
+    description: Staging model for fare components.
+    columns:
+      - name: fare_component_id
+        tests: [not_null, unique]
+      - name: fare_id
+        tests: [not_null]
+
+  - name: stg_pg__promo_usage
+    description: Staging model for promotion usage.
+    columns:
+      - name: promo_usage_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: stg_pg__roles
+    description: Staging model for user roles.
+    columns:
+      - name: role_id
+        tests: [not_null, unique]
+      - name: role_code
+        tests: [not_null, unique]
+
+  - name: stg_pg__payment_method_types
+    description: Staging model for payment method reference values.
+    columns:
+      - name: payment_method_type_id
+        tests: [not_null, unique]
+      - name: method_code
+        tests: [not_null, unique]
+
+  - name: stg_pg__promotions
+    description: Staging model for promotion master data.
+    columns:
+      - name: promotion_id
+        tests: [not_null, unique]
+      - name: promo_code
+        tests: [not_null, unique]
+      - name: discount_type
+        tests:
+          - accepted_values:
+              values: ['PERCENT','FIXED']
+      - name: promotion_status
+        tests:
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','EXPIRED']
+
+  - name: stg_pg__user_accounts
+    description: Staging model for users. Raw email and phone are not exposed; hashed identifiers are provided.
+    columns:
+      - name: user_id
+        tests: [not_null, unique]
+      - name: account_status
+        tests:
+          - accepted_values:
+              values: ['ACTIVE','SUSPENDED','DELETED']
+
+  - name: stg_pg__user_roles
+    description: Staging model for user-role assignments.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['user_id', 'role_id']
+    columns:
+      - name: user_id
+        tests: [not_null]
+      - name: role_id
+        tests: [not_null]
+
+  - name: stg_pg__driver_documents
+    description: Staging model for driver documents.
+    columns:
+      - name: document_id
+        tests: [not_null, unique]
+      - name: verification_status
+        tests:
+          - accepted_values:
+              values: ['PENDING','VERIFIED','REJECTED']
+
+  - name: stg_pg__vehicles
+    description: Staging model for vehicles.
+    columns:
+      - name: vehicle_id
+        tests: [not_null, unique]
+      - name: vehicle_type
+        tests:
+          - accepted_values:
+              values: ['BIKE','CAR','XL']
+      - name: vehicle_status
+        tests:
+          - accepted_values:
+              values: ['ACTIVE','INACTIVE','SUSPENDED']
+
+  - name: stg_pg__driver_vehicle_assignments
+    description: Staging model for driver-vehicle assignments.
+    columns:
+      - name: assignment_id
+        tests: [not_null, unique]
+      - name: driver_id
+        tests: [not_null]
+      - name: vehicle_id
+        tests: [not_null]
+
+  - name: stg_pg__user_payment_methods
+    description: Staging model for user payment methods.
+    columns:
+      - name: user_payment_method_id
+        tests: [not_null, unique]
+      - name: payment_method_status
+        tests:
+          - accepted_values:
+              values: ['ACTIVE','EXPIRED','DISABLED']
+
+  - name: stg_pg__reviews
+    description: Staging model for reviews.
+    columns:
+      - name: review_id
+        tests: [not_null, unique]
+      - name: rating_score
+        tests:
+          - accepted_values:
+              values: [1,2,3,4,5]
+
+  - name: stg_pg__payment_refunds
+    description: Staging model for payment refunds.
+    columns:
+      - name: refund_id
+        tests: [not_null, unique]
+      - name: refund_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','COMPLETED','FAILED']
+
+  - name: int_cdc__rides_latest
+    description: Latest state of each ride from CDC using ride_id, __source_ts_ms, __lsn, and __op.
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+      - name: is_deleted
+        tests: [not_null]
+
+  - name: int_cdc__drivers_latest
+    description: Latest state of each driver profile from CDC.
+    columns:
+      - name: driver_id
+        tests: [not_null, unique]
+      - name: is_deleted
+        tests: [not_null]
+
+  - name: int_cdc__payment_transactions_latest
+    description: Latest state of each payment transaction from CDC.
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+      - name: is_deleted
+        tests: [not_null]
+
+  - name: int_core__rides_unified
+    description: Business-ready ride core model derived from CDC latest-state.
+    tests:
+      - duration_non_negative:
+          start_column: requested_at
+          end_column: completed_at
+      - completed_ride_has_completed_at:
+          status_column: ride_status
+          completed_at_column: completed_at
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+      - name: rider_id
+        tests: [not_null]
+      - name: ride_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+
+  - name: int_core__ride_lifecycle
+    description: Ride lifecycle durations and SLA flags.
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__ride_locations_pivoted
+    description: One row per ride with requested and actual pickup/dropoff location columns.
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__final_fares
+    description: Latest final fare per ride.
+    columns:
+      - name: fare_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__payment_status_per_ride
+    description: Latest payment transaction per ride.
+    tests:
+      - paid_payment_amount_valid:
+          status_column: payment_status
+          amount_column: amount
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__reviews_per_ride
+    description: Review metrics collapsed to one row per ride.
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__promo_usage_per_ride
+    description: Promotion usage collapsed to one row per ride.
+    columns:
+      - name: promo_usage_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null, unique]
+
+  - name: int_core__driver_vehicle_current
+    description: Current active vehicle assignment per driver.
+    columns:
+      - name: driver_id
+        tests: [not_null, unique]
+      - name: vehicle_id
+        tests: [not_null]
+
+  - name: int_metrics__ride_daily_city_service
+    description: Daily service KPI aggregation by requested date, city, service type, and ride status.
+    columns:
+      - name: requested_date
+        tests: [not_null]
+
+  - name: int_metrics__driver_daily
+    description: Daily driver performance aggregation.
+    columns:
+      - name: requested_date
+        tests: [not_null]
+      - name: driver_id
+        tests: [not_null]
+
+  - name: dim_riders
+    description: Rider dimension with hashed identifiers and no raw PII.
+    columns:
+      - name: rider_id
+        tests: [not_null, unique]
+      - name: rider_key
+        tests: [not_null, unique]
+
+  - name: dim_drivers
+    description: Driver dimension using CDC latest-state.
+    columns:
+      - name: driver_id
+        tests: [not_null, unique]
+      - name: driver_key
+        tests: [not_null, unique]
+      - name: user_id
+        tests: [not_null]
+
+  - name: dim_vehicles
+    description: Vehicle dimension.
+    columns:
+      - name: vehicle_id
+        tests: [not_null, unique]
+      - name: vehicle_key
+        tests: [not_null, unique]
+
+  - name: dim_payment_methods
+    description: Payment method type dimension.
+    columns:
+      - name: payment_method_type_id
+        tests: [not_null, unique]
+      - name: payment_method_key
+        tests: [not_null, unique]
+
+  - name: dim_promotions
+    description: Promotion dimension.
+    columns:
+      - name: promotion_id
+        tests: [not_null, unique]
+      - name: promotion_key
+        tests: [not_null, unique]
+
+  - name: dim_date
+    description: Date dimension for reporting and Looker filters.
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+
+  - name: fct_rides
+    description: One row per ride fact table.
+    tests:
+      - completed_ride_has_completed_at:
+          status_column: ride_status
+          completed_at_column: completed_at
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+      - name: rider_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_riders')
+              field: rider_id
+      - name: driver_id
+        tests:
+          - relationships:
+              to: ref('dim_drivers')
+              field: driver_id
+      - name: vehicle_id
+        tests:
+          - relationships:
+              to: ref('dim_vehicles')
+              field: vehicle_id
+
+  - name: fct_ride_fares
+    description: One row per final ride fare.
+    columns:
+      - name: fare_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('fct_rides')
+              field: ride_id
+
+  - name: fct_payments
+    description: One row per latest ride payment transaction.
+    tests:
+      - paid_payment_amount_valid:
+          status_column: payment_status
+          amount_column: amount
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('fct_rides')
+              field: ride_id
+
+  - name: fct_reviews
+    description: Review fact table.
+    columns:
+      - name: review_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests:
+          - relationships:
+              to: ref('fct_rides')
+              field: ride_id
+
+  - name: fct_driver_daily_performance
+    description: Driver daily performance fact table.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['requested_date', 'driver_id', 'service_type']
+    columns:
+      - name: requested_date
+        tests: [not_null]
+      - name: driver_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_drivers')
+              field: driver_id
+
+  - name: fct_service_daily_performance
+    description: Service daily performance fact table by city and service type.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['requested_date', 'city_code', 'service_type', 'ride_status']
+    columns:
+      - name: requested_date
+        tests: [not_null]
+
+  - name: rpt_looker__ride_operations_dashboard
+    description: Looker-ready wide table with one row per ride for the Ride-Hailing Operations & Revenue Dashboard.
+    tests:
+      - completed_ride_has_completed_at:
+          status_column: ride_status
+          completed_at_column: completed_at
+      - completed_ride_has_final_fare:
+          status_column: ride_status
+          final_fare_column: total_fare
+    columns:
+      - name: ride_id
+        description: Primary ride identifier. Grain of this reporting table.
+        tests: [not_null, unique]
+      - name: requested_date
+        tests: [not_null]
+      - name: ride_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: service_type
+        tests:
+          - accepted_values:
+              values: ['BIKE','CAR','XL']
+
+  - name: agg_looker__daily_kpis
+    description: Optional pre-aggregated daily KPI table for faster Looker tiles.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['requested_date', 'city_code', 'service_type']
+    columns:
+      - name: requested_date
+        tests: [not_null]

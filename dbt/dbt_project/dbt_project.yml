@@ -1,89 +1,80 @@
 name: ride_hailing
-version: "1.0.0"
+version: '1.0.0'
 config-version: 2
+
 profile: ride_hailing
 
 model-paths: ["models"]
-seed-paths: ["seeds"]
-test-paths: ["tests"]
-macro-paths: ["macros"]
 analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
+docs-paths: ["docs"]
 
-target-path: "target"
+target-path: target
 clean-targets:
-  - "target"
-  - "dbt_packages"
+  - target
+  - dbt_packages
 
 vars:
-  start_date: "2026-01-01"
-  bq_location: "us"
+  source_project: dbt-taxi-explore
+  batch_bronze_dataset: dev_bronze_pg
+  cdc_bronze_dataset: dev_bronze_cdc_events
+  cdc_lookback_hours: 1440        # 60 days. For initial production full-refresh, override to a wider window.
+  incremental_lookback_days: 3
+  reporting_start_date: '2026-03-01'
+  timezone: Asia/Jakarta
 
-seeds:
-  ride_hailing:
-    indonesia_public_holidays:
-      +column_types:
-        holiday_date: date
-        holiday_name: string
-      +tags: ["daily"]
+quoting:
+  database: true
+  schema: true
+  identifier: true
 
 models:
   ride_hailing:
+    +persist_docs:
+      relation: true
+      columns: true
+    +labels:
+      domain: ride_hailing
+      managed_by: dbt
+      project_layer: analytics
     staging:
+      +schema: silver_ride
       +materialized: view
-      cdc:
-        +tags: ["hourly"]
-      pg:
-        +tags: ["daily"]
+      +tags: ['staging']
     intermediate:
+      +schema: silver_ride
       +materialized: view
-      +tags: ["daily"]
-      int__ride_enriched:
+      +tags: ['intermediate']
+      cdc:
         +materialized: incremental
-        +tags: ["hourly"]
-      int__payment_enriched:
+        +incremental_strategy: merge
+        +on_schema_change: sync_all_columns
+        +tags: ['intermediate', 'cdc_latest']
+      metrics:
         +materialized: incremental
-        +tags: ["hourly"]
-      int__ride_status_transitions:
-        +materialized: incremental
-        +tags: ["daily"]
-      int__payment_audit_trail:
-        +materialized: incremental
-        +tags: ["hourly"]
-      int__rider_lifetime:
-        +materialized: table
-        +tags: ["daily"]
+        +incremental_strategy: insert_overwrite
+        +on_schema_change: sync_all_columns
+        +tags: ['intermediate', 'metrics']
     marts:
+      +schema: gold_ride
       +materialized: table
-      dims:
-        +tags: ["daily"]
+      +tags: ['marts']
       facts:
-        fct_rides:
-          +materialized: incremental
-          +tags: ["hourly"]
-          +partition_by:
-            field: ride_date
-            data_type: date
-          +cluster_by: ["city_code", "service_type", "ride_status"]
-        fct_payments:
-          +materialized: incremental
-          +tags: ["hourly"]
-          +partition_by:
-            field: txn_date
-            data_type: date
-          +cluster_by: ["payment_status", "provider_name"]
-        fct_reviews:
-          +tags: ["daily"]
-          +partition_by:
-            field: review_date
-            data_type: date
-          +cluster_by: ["review_type"]
-        fct_ride_status_transitions:
-          +materialized: incremental
-          +tags: ["daily"]
-          +partition_by:
-            field: changed_date
-            data_type: date
-          +cluster_by: ["new_status"]
-      aggregates:
-        +tags: ["daily"]
+        +materialized: incremental
+        +incremental_strategy: insert_overwrite
+        +on_schema_change: sync_all_columns
+        +tags: ['marts', 'facts']
+    reporting:
+      +schema: reporting_ride
+      +materialized: incremental
+      +incremental_strategy: insert_overwrite
+      +on_schema_change: sync_all_columns
+      +tags: ['reporting', 'looker']
+
+tests:
+  ride_hailing:
+    +store_failures: true
+    +schema: audit_ride

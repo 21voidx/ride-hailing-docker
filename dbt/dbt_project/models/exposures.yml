@@ -1,56 +1,17 @@
 version: 2
 
 exposures:
-  - name: looker_studio_operations
+  - name: ride_hailing_operations_revenue_dashboard
+    label: Ride-Hailing Operations & Revenue Dashboard
     type: dashboard
+    maturity: high
+    url: https://lookerstudio.google.com/
     description: >
-      Operational dashboard tracking daily ride volume, completion rates,
-      cancellation trends, and surge patterns across cities and service types.
-    owner:
-      name: Data Analytics
-      email: analytics@company.com
-    url: https://lookerstudio.google.com/reporting/<report-id-operations>
+      Primary Looker dashboard for ride funnel, completion, cancellation, payment failure,
+      revenue, driver performance, promo usage, and customer rating KPIs.
     depends_on:
-      - ref('agg_ride_daily')
-      - ref('agg_driver_daily')
-      - ref('dim_date')
-
-  - name: looker_studio_driver_performance
-    type: dashboard
-    description: >
-      Driver performance dashboard showing daily trip counts, earnings,
-      ratings, and completion rates per driver.
+      - ref('rpt_looker__ride_operations_dashboard')
+      - ref('agg_looker__daily_kpis')
     owner:
-      name: Data Analytics
-      email: analytics@company.com
-    url: https://lookerstudio.google.com/reporting/<report-id-driver>
-    depends_on:
-      - ref('agg_driver_daily')
-      - ref('dim_date')
-
-  - name: looker_studio_finance
-    type: dashboard
-    description: >
-      Finance dashboard covering gross/net revenue, refunds, platform fees,
-      and driver payouts segmented by city and service type.
-    owner:
-      name: Data Analytics
-      email: analytics@company.com
-    url: https://lookerstudio.google.com/reporting/<report-id-finance>
-    depends_on:
-      - ref('agg_revenue_daily')
-      - ref('dim_date')
-
-  - name: looker_studio_growth
-    type: dashboard
-    description: >
-      Growth dashboard showing monthly active riders, cohort retention,
-      promo effectiveness, and rider segmentation trends.
-    owner:
-      name: Data Analytics
-      email: analytics@company.com
-    url: https://lookerstudio.google.com/reporting/<report-id-growth>
-    depends_on:
-      - ref('agg_rider_monthly')
-      - ref('agg_promo_summary')
-      - ref('dim_date')
+      name: Data Team
+      email: 020ownedby@premiumportal.id

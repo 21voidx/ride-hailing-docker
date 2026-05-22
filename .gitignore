@@ -50,3 +50,4 @@ dbt_taxi/
 dbt_taxi_v2/
 script_rename.py
 dbt_ride_ops_claude/
+ride_hailing_dbt_project/

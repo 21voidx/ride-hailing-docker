@@ -1,0 +1,35 @@
+{{ config(materialized='view') }}
+
+select
+    ride_id,
+    rider_id,
+    driver_id,
+    vehicle_id,
+    ride_status,
+    service_type,
+    city_code,
+    requested_at,
+    accepted_at,
+    arrived_at,
+    started_at,
+    completed_at,
+    cancelled_at,
+    cancelled_by_user_id,
+    cancel_reason_code,
+    cancel_reason_note,
+    estimated_distance_km,
+    estimated_duration_min,
+    created_at,
+    updated_at,
+    cdc_event_at,
+    cdc_lsn,
+    cdc_operation,
+    {{ is_status('ride_status', 'COMPLETED') }} as is_completed,
+    {{ is_status('ride_status', 'CANCELLED') }} as is_cancelled,
+    {{ is_status('ride_status', 'PAYMENT_FAILED') }} as is_payment_failed,
+    date(requested_at, '{{ var("timezone", "Asia/Jakarta") }}') as requested_date,
+    extract(hour from datetime(requested_at, '{{ var("timezone", "Asia/Jakarta") }}')) as requested_hour,
+    date(completed_at, '{{ var("timezone", "Asia/Jakarta") }}') as completed_date,
+    {{ audit_columns() }}
+from {{ ref('int_cdc__rides_latest') }}
+where not is_deleted

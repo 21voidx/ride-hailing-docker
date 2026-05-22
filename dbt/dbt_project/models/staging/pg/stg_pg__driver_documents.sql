@@ -1,24 +1,27 @@
 with source as (
-    select * from {{ source('dev_bronze_pg', 'driver_document') }}
-),
-
-final as (
     select
         document_id,
-        driver_id,
-        document_type,
-        document_number,
-        verification_status,
-        submitted_at,
-        verified_at,
-        verified_by,
-        expires_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        verification_status = 'VERIFIED'                                        as is_verified,
-        (expires_at is not null and expires_at < CURRENT_DATE())                as is_expired
+driver_id,
+document_type,
+document_number,
+verification_status,
+submitted_at,
+verified_at,
+verified_by,
+expires_at,
+rejection_reason,
+created_at,
+updated_at,
+_ingested_at,
+_source_system
+    from {{ source('bronze_pg', 'driver_document') }}
+),
+deduped as (
+    select *
     from source
+    qualify row_number() over (partition by document_id order by _ingested_at desc) = 1
 )
-
-select * from final
+select
+    *,
+    {{ audit_columns() }}
+from deduped

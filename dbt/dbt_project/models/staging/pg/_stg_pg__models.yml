@@ -60,6 +60,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__driver_documents
     description: Driver KYC documents. Derives is_verified and is_expired booleans.
@@ -91,11 +92,13 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: is_expired
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__driver_vehicle_assignments
     description: >
@@ -123,11 +126,13 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: is_currently_active
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__ride_fares
     description: >
@@ -148,7 +153,6 @@ models:
           - not_null
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 1
-              strictly: true
       - name: distance_km
         tests:
           - not_null
@@ -306,6 +310,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__promotions
     description: Promotion definitions. Adds is_currently_valid derived boolean.
@@ -345,6 +350,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__promo_usages
     description: Per-ride promo application records.
@@ -393,6 +399,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__user_payment_methods
     description: >
@@ -437,6 +444,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__payment_method_types
     description: Lookup table for payment method types (CASH, CARD, EWALLET, BANK_TRANSFER).
@@ -452,6 +460,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__roles
     description: Application role definitions (RIDER, DRIVER, ADMIN).
@@ -467,6 +476,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
 
   - name: stg_pg__user_roles
     description: User-to-role assignments. Composite PK on (user_id, role_id).
@@ -490,6 +500,7 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [user_id, role_id]

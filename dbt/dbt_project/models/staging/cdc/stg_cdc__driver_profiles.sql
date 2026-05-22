@@ -8,7 +8,7 @@ cast_ts as (
         cast(driver_id as INT64)                                as driver_id,
         cast(user_id as INT64)                                  as user_id,
         license_number,
-        SAFE.PARSE_DATE('%Y-%m-%d', license_expiry)             as license_expiry,
+        cast(license_expiry as DATE)                            as license_expiry,
         driver_status,
         verification_status,
         {{ cast_debezium_timestamp('verified_at') }}            as verified_at,

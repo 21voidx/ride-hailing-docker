@@ -8,7 +8,6 @@ final as (
         driver_id,
         document_type,
         document_number,
-        document_file_url,
         verification_status,
         submitted_at,
         verified_at,

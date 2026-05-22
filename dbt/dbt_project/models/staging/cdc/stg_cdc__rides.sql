@@ -1,6 +1,34 @@
+-- Current-state staging for rides, built directly from partitioned CDC events.
+-- This avoids querying dev_bronze_cdc_current when its underlying view does not
+-- push down a required partition filter to dev_bronze_cdc_events.ride_events.
+
 with source as (
-    select * from {{ source('dev_bronze_cdc_current', 'ride') }}
-    where __op != 'd'
+    select *
+    from {{ source('dev_bronze_cdc_events', 'ride_events') }}
+    where {{ cdc_partition_filter(days_back=30) }}
+),
+
+ranked as (
+    select
+        *,
+        row_number() over (
+            partition by cast(ride_id as STRING)
+            order by
+                coalesce(safe_cast(__source_ts_ms as INT64), 0) desc,
+                coalesce(safe_cast(__lsn as INT64), 0) desc,
+                coalesce(
+                    {{ cast_debezium_timestamp('updated_at') }},
+                    {{ cast_debezium_timestamp('created_at') }}
+                ) desc
+        ) as rn
+    from source
+),
+
+current_rows as (
+    select * except (rn)
+    from ranked
+    where rn = 1
+      and coalesce(__op, '') != 'd'
 ),
 
 cast_ts as (
@@ -29,7 +57,7 @@ cast_ts as (
         __table,
         cast(__lsn as INT64)                                    as __lsn,
         cast(__source_ts_ms as INT64)                           as __source_ts_ms
-    from source
+    from current_rows
 ),
 
 final as (

@@ -101,12 +101,14 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: is_suspended
         description: True when driver_status = 'SUSPENDED'.
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: __source_ts_ms
         tests: [not_null]
 
@@ -145,16 +147,19 @@ models:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: is_failed
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: is_refunded
         tests:
           - not_null
           - accepted_values:
               values: [true, false]
+              quote: false
       - name: __source_ts_ms
         tests: [not_null]
 

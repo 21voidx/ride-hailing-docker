@@ -303,6 +303,7 @@ models:
         - 3
         - 4
         - 5
+        quote: false
 - name: stg_pg__payment_refunds
   description: Staging model for payment refunds.
   columns:

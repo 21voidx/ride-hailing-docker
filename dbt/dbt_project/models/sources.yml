@@ -163,6 +163,7 @@ sources:
             tests:
               - accepted_values:
                   values: [1, 2, 3, 4, 5]
+                  quote: false
       - name: payment_refund
         description: Payment refund table.
         columns:

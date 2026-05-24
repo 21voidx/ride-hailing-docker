@@ -1,0 +1,70 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Date dimension. Mencakup 2020-01-01 hingga 2030-12-31."
+    columns:
+      - name: date_key
+        description: "Surrogate key format YYYYMMDD (integer)."
+        tests: [not_null, unique]
+      - name: full_date
+        tests: [not_null, unique]
+
+  - name: dim_user
+    description: "User / rider dimension. SCD Type 1."
+    columns:
+      - name: user_sk
+        description: "Surrogate key."
+        tests: [not_null, unique]
+      - name: user_id
+        description: "Natural key dari PostgreSQL."
+        tests: [not_null, unique]
+      - name: account_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['ACTIVE','SUSPENDED','DELETED']
+
+  - name: dim_driver
+    description: "Driver dimension dengan current vehicle. SCD Type 1."
+    columns:
+      - name: driver_sk
+        tests: [not_null, unique]
+      - name: driver_id
+        tests: [not_null, unique]
+      - name: rating_tier
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['EXCELLENT','GOOD','AVERAGE','BELOW_AVERAGE']
+
+  - name: dim_vehicle
+    description: "Vehicle master dimension. SCD Type 1."
+    columns:
+      - name: vehicle_sk
+        tests: [not_null, unique]
+      - name: vehicle_id
+        tests: [not_null, unique]
+      - name: vehicle_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['BIKE','CAR','XL']
+
+  - name: dim_payment_method
+    description: "User payment method dimension."
+    columns:
+      - name: payment_method_sk
+        tests: [not_null, unique]
+      - name: user_payment_method_id
+        tests: [not_null, unique]
+
+  - name: dim_promotion
+    description: "Promotion dimension."
+    columns:
+      - name: promotion_sk
+        tests: [not_null, unique]
+      - name: promotion_id
+        tests: [not_null, unique]
+      - name: promo_code
+        tests: [not_null, unique]

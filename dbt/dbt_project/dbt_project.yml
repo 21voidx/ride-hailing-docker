@@ -1,8 +1,8 @@
-name: ride_hailing
+name: 'ride_hailing'
 version: '1.0.0'
 config-version: 2
 
-profile: ride_hailing
+profile: 'ride_hailing'
 
 model-paths: ["models"]
 analysis-paths: ["analyses"]
@@ -10,71 +10,44 @@ test-paths: ["tests"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
-docs-paths: ["docs"]
 
-target-path: target
+target-path: "target"
 clean-targets:
-  - target
-  - dbt_packages
+  - "target"
+  - "dbt_packages"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Variables
+# ─────────────────────────────────────────────────────────────────────────────
 vars:
   source_project: dbt-taxi-explore
-  batch_bronze_dataset: dev_bronze_pg
-  cdc_bronze_dataset: dev_bronze_cdc_events
-  cdc_lookback_hours: 720        # 30 days. For initial production full-refresh, override to a wider window.
-  incremental_lookback_days: 3
-  reporting_start_date: '2026-03-01'
-  timezone: Asia/Jakarta
 
-quoting:
-  database: true
-  schema: true
-  identifier: true
+  # Schema names untuk raw bronze layer
+  bronze_cdc_schema: "dev_bronze_cdc_events"   
+  bronze_batch_schema: "dev_bronze_pg"     
+
+  # Partition start untuk query CDC tables (require_partition_filter = TRUE)
+  # Set ke tanggal mulai data terlama yang relevan
+  cdc_partition_start: "2020-01-01"
+  reporting_timezone: "Asia/Jakarta"
+  incremental_lookback_days: 2
 
 models:
   ride_hailing:
-    +persist_docs:
-      relation: true
-      columns: true
-    +labels:
-      domain: ride_hailing
-      managed_by: dbt
-      project_layer: analytics
+
     staging:
-      +schema: silver_ride
       +materialized: view
-      +tags: ['staging']
+      +schema: staging
+
     intermediate:
-      +schema: silver_ride
-      +materialized: view
-      +tags: ['intermediate']
-      cdc:
-        +materialized: incremental
-        +incremental_strategy: merge
-        +on_schema_change: sync_all_columns
-        +tags: ['intermediate', 'cdc_latest']
-      metrics:
-        +materialized: incremental
-        +incremental_strategy: insert_overwrite
-        +on_schema_change: sync_all_columns
-        +tags: ['intermediate', 'metrics']
+      +materialized: ephemeral
+
     marts:
-      +schema: gold_ride
-      +materialized: table
-      +tags: ['marts']
+      dimensions:
+        +materialized: table
+        +schema: marts
+
       facts:
         +materialized: incremental
-        +incremental_strategy: insert_overwrite
+        +schema: marts
         +on_schema_change: sync_all_columns
-        +tags: ['marts', 'facts']
-    reporting:
-      +schema: reporting_ride
-      +materialized: incremental
-      +incremental_strategy: insert_overwrite
-      +on_schema_change: sync_all_columns
-      +tags: ['reporting', 'looker']
-
-tests:
-  ride_hailing:
-    +store_failures: true
-    +schema: audit_ride

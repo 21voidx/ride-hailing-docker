@@ -4,6 +4,7 @@
 infrastructure/gcp/service-account-key.json
 infrastructure/gcp/*.json
 secrets/
+credentials/service-account.json
 
 # ─── Python ───────────────────────────────────────────────
 __pycache__/
@@ -43,11 +44,11 @@ monitoring/great_expectations/uncommitted/
 .ipynb_checkpoints/
 *.ipynb
 Makefile
-credentials/service-account.json
-image/
-dev_bronze_pg&mysql.sql
-dbt_taxi/
-dbt_taxi_v2/
-script_rename.py
-dbt_ride_ops_claude/
-ride_hailing_dbt_project/
+
+# ─── DBT ───────────────────────────────────────────────
+development/
+dbt/dbt_project/dbt_packages/
+dbt/dbt_project/logs/
+dbt/dbt_project/target/
+dbt/dbt_project/REVIEW_NOTES.md
+

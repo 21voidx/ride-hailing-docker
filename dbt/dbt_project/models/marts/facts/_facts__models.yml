@@ -1,0 +1,160 @@
+version: 2
+
+models:
+  - name: fct_rides
+    description: "Core fact table. Grain: 1 row per ride. Berisi lifecycle, fare, selected payment summary, promo, review, dan foreign keys ke dimensi."
+    columns:
+      - name: ride_sk
+        description: "Surrogate key dari ride_id."
+        tests: [not_null, unique]
+      - name: ride_id
+        description: "Natural key ride dari PostgreSQL."
+        tests: [not_null, unique]
+      - name: rider_sk
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_user')
+              field: user_sk
+      - name: driver_sk
+        tests:
+          - relationships:
+              to: ref('dim_driver')
+              field: driver_sk
+      - name: vehicle_sk
+        tests:
+          - relationships:
+              to: ref('dim_vehicle')
+              field: vehicle_sk
+      - name: payment_method_sk
+        tests:
+          - relationships:
+              to: ref('dim_payment_method')
+              field: payment_method_sk
+      - name: promotion_sk
+        tests:
+          - relationships:
+              to: ref('dim_promotion')
+              field: promotion_sk
+      - name: ride_date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: ride_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: total_fare
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: driver_earning
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: fct_ride_status_events
+    description: "Event fact table. Grain: 1 row per ride status event dari ride_status_history. Cocok untuk analisis funnel, durasi antarstatus, dan bottleneck operasional."
+    columns:
+      - name: ride_status_event_sk
+        tests: [not_null, unique]
+      - name: ride_status_history_id
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null]
+      - name: status_event_date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: new_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: status_event_count
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 1
+
+  - name: fct_rides_hourly
+    description: "Aggregate fact table. Grain: 1 row per ride_hour + city_code + service_type. Dipakai untuk dashboard realtime atau near-real-time."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['ride_hour', 'city_code', 'service_type']
+    columns:
+      - name: ride_hourly_sk
+        tests: [not_null, unique]
+      - name: ride_hour
+        tests: [not_null]
+      - name: ride_hour_date
+        tests: [not_null]
+      - name: ride_count
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: fct_rides_daily
+    description: "Aggregate fact table. Grain: 1 row per ride_date + city_code + service_type. Dipakai untuk KPI harian dan laporan operasional."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['ride_date', 'city_code', 'service_type']
+    columns:
+      - name: ride_daily_sk
+        tests: [not_null, unique]
+      - name: ride_date
+        tests: [not_null]
+      - name: ride_count
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: fct_payments
+    description: "Payment fact table. Grain: 1 row per payment_transaction. Dipisahkan dari fct_rides agar multiple payment attempts tidak merusak grain ride."
+    columns:
+      - name: payment_sk
+        description: "Surrogate key dari transaction_id."
+        tests: [not_null, unique]
+      - name: transaction_id
+        description: "Natural key payment_transaction dari PostgreSQL."
+        tests: [not_null, unique]
+      - name: ride_id
+        description: "Degenerate dimension untuk join ke ride."
+        tests: [not_null]
+      - name: rider_sk
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_sk
+      - name: payment_method_sk
+        tests:
+          - relationships:
+              to: ref('dim_payment_method')
+              field: payment_method_sk
+      - name: transaction_date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: payment_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['AUTHORIZED','CAPTURED','PAID','FAILED','REFUNDED']
+      - name: amount
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: net_revenue
+        description: "total_charged dikurangi total_refunded."

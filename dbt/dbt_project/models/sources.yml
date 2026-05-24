@@ -1,216 +1,55 @@
 version: 2
 
 sources:
-  - name: bronze_pg
-    description: Batch-landed PostgreSQL operational tables in BigQuery. These tables are not modified by dbt.
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Source 1: CDC Events (Debezium → Kafka → GCS → BigQuery)
+  # Dataset  : dev_bronze_cdc_events
+  # ─────────────────────────────────────────────────────────────────────────────
+  - name: ride_ops_cdc
+    description: "Raw CDC events dari Debezium yang memonitor PostgreSQL ride_ops_pg. Setiap row merepresentasikan satu CDC event (INSERT/UPDATE/DELETE). Di-load via Debezium → Kafka → GCS → BigQuery."
     database: "{{ var('source_project', 'dbt-taxi-explore') }}"
-    schema: "{{ var('batch_bronze_dataset', 'dev_bronze_pg') }}"
-    loaded_at_field: _ingested_at
-    freshness:
-      warn_after: {count: 24, period: hour}
-      error_after: {count: 48, period: hour}
-      filter: "_ingested_at >= timestamp_sub(current_timestamp(), interval 7 day)"
-    tables:
-      - name: ride_status_history
-        description: Append-only ride lifecycle transition history from PostgreSQL.
-        columns:
-          - name: ride_status_history_id
-            tests: [not_null, unique]
-          - name: ride_id
-            tests: [not_null]
-          - name: new_status
-            tests:
-              - not_null
-              - accepted_values:
-                  values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
-      - name: ride_location
-        description: Append-only requested and actual pickup/dropoff locations.
-        columns:
-          - name: ride_location_id
-            tests: [not_null, unique]
-          - name: ride_id
-            tests: [not_null]
-          - name: location_type
-            tests:
-              - not_null
-              - accepted_values:
-                  values: ['PICKUP_REQUESTED','DROPOFF_REQUESTED','PICKUP_ACTUAL','DROPOFF_ACTUAL']
-      - name: ride_tracking_point
-        description: Append-only GPS tracking points while rides are in progress.
-        columns:
-          - name: tracking_point_id
-            tests: [not_null, unique]
-          - name: ride_id
-            tests: [not_null]
-      - name: ride_fare
-        description: Ride fare header table, including final fare, platform fee, driver earning, discount, tax, and surge.
-        columns:
-          - name: fare_id
-            tests: [not_null, unique]
-          - name: ride_id
-            tests: [not_null]
-          - name: fare_type
-            tests:
-              - not_null
-              - accepted_values:
-                  values: ['ESTIMATED','FINAL','ADJUSTED']
-      - name: ride_fare_component
-        description: Component-level fare breakdown.
-        columns:
-          - name: fare_component_id
-            tests: [not_null, unique]
-          - name: fare_id
-            tests: [not_null]
-      - name: promo_usage
-        description: Promotion usage per ride.
-        columns:
-          - name: promo_usage_id
-            tests: [not_null, unique]
-          - name: ride_id
-            tests: [not_null, unique]
-      - name: role
-        description: User role reference data.
-        columns:
-          - name: role_id
-            tests: [not_null, unique]
-          - name: role_code
-            tests: [not_null, unique]
-      - name: payment_method_type
-        description: Payment method type reference data.
-        columns:
-          - name: payment_method_type_id
-            tests: [not_null, unique]
-          - name: method_code
-            tests: [not_null, unique]
-      - name: promotion
-        description: Promotion master data.
-        columns:
-          - name: promotion_id
-            tests: [not_null, unique]
-          - name: promo_code
-            tests: [not_null, unique]
-          - name: discount_type
-            tests:
-              - accepted_values:
-                  values: ['PERCENT','FIXED']
-          - name: promotion_status
-            tests:
-              - accepted_values:
-                  values: ['ACTIVE','INACTIVE','EXPIRED']
-      - name: user_account
-        description: User account master data. PII is hashed or excluded in downstream models.
-        columns:
-          - name: user_id
-            tests: [not_null, unique]
-          - name: account_status
-            tests:
-              - accepted_values:
-                  values: ['ACTIVE','SUSPENDED','DELETED']
-      - name: user_role
-        description: Bridge table assigning roles to users.
-        tests:
-          - dbt_utils.unique_combination_of_columns:
-              combination_of_columns: ['user_id', 'role_id']
-        columns:
-          - name: user_id
-            tests: [not_null]
-          - name: role_id
-            tests: [not_null]
-      - name: driver_document
-        description: Driver verification documents.
-        columns:
-          - name: document_id
-            tests: [not_null, unique]
-          - name: driver_id
-            tests: [not_null]
-      - name: vehicle
-        description: Vehicle master data.
-        columns:
-          - name: vehicle_id
-            tests: [not_null, unique]
-          - name: vehicle_type
-            tests:
-              - accepted_values:
-                  values: ['BIKE','CAR','XL']
-          - name: vehicle_status
-            tests:
-              - accepted_values:
-                  values: ['ACTIVE','INACTIVE','SUSPENDED']
-      - name: driver_vehicle_assignment
-        description: Driver-to-vehicle assignment table.
-        columns:
-          - name: assignment_id
-            tests: [not_null, unique]
-          - name: driver_id
-            tests: [not_null]
-          - name: vehicle_id
-            tests: [not_null]
-      - name: user_payment_method
-        description: User payment method master table without raw payment tokens.
-        columns:
-          - name: user_payment_method_id
-            tests: [not_null, unique]
-          - name: payment_method_status
-            tests:
-              - accepted_values:
-                  values: ['ACTIVE','EXPIRED','DISABLED']
-      - name: review
-        description: Ride reviews and ratings.
-        columns:
-          - name: review_id
-            tests: [not_null, unique]
-          - name: rating_score
-            tests:
-              - accepted_values:
-                  values: [1, 2, 3, 4, 5]
-                  quote: false
-      - name: payment_refund
-        description: Payment refund table.
-        columns:
-          - name: refund_id
-            tests: [not_null, unique]
-          - name: refund_status
-            tests:
-              - accepted_values:
-                  values: ['REQUESTED','COMPLETED','FAILED']
+    schema: "{{ var('bronze_cdc_schema', 'dev_bronze_cdc_events') }}"
+    config:
+      loaded_at_field: "TIMESTAMP_MILLIS(__source_ts_ms)"
+      freshness:
+        warn_after: {count: 1, period: hour}
+        error_after: {count: 3, period: hour}
+        filter: "_PARTITIONTIME >= timestamp_sub(current_timestamp(), interval 2 day)"
 
-  - name: bronze_cdc_events
-    description: Debezium CDC event log tables landed in BigQuery through Kafka and GCS Sink. These tables require a partition filter.
-    database: "{{ var('source_project', 'dbt-taxi-explore') }}"
-    schema: "{{ var('cdc_bronze_dataset', 'dev_bronze_cdc_events') }}"
-    loaded_at_field: "timestamp_millis(__source_ts_ms)"
-    freshness:
-      warn_after: {count: 30, period: minute}
-      error_after: {count: 2, period: hour}
-      filter: "_PARTITIONTIME >= timestamp_sub(current_timestamp(), interval 2 day)"
     tables:
       - name: ride_events
-        description: CDC event stream for public.ride.
-        columns:
-          - name: ride_id
-            tests: [not_null]
-          - name: __op
-            tests:
-              - accepted_values:
-                  values: ['c','r','u','d']
-                  quote: true
       - name: driver_profile_events
-        description: CDC event stream for public.driver_profile.
-        columns:
-          - name: driver_id
-            tests: [not_null]
-          - name: __op
-            tests:
-              - accepted_values:
-                  values: ['c','r','u','d']
-                  quote: true
       - name: payment_transaction_events
-        description: CDC event stream for public.payment_transaction.
-        columns:
-          - name: transaction_id
-            tests: [not_null]
-          - name: __op
-            tests:
-              - accepted_values:
-                  values: ['c','r','u','d']
-                  quote: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Source 2: Batch (Airflow → BigQuery)
+  # Dataset  : dev_bronze_pg
+  # ─────────────────────────────────────────────────────────────────────────────
+  - name: ride_ops_batch
+    description: "Raw tables dari PostgreSQL ride_ops_pg yang di-load ke BigQuery via Airflow batch job (daily / hourly). Timestamps sudah bertipe TIMESTAMP. Ada kolom _ingested_at dan _source_system."
+    database: "{{ var('source_project', 'dbt-taxi-explore') }}"
+    schema: "{{ var('bronze_batch_schema', 'dev_bronze_pg') }}"
+    config:
+      loaded_at_field: "_ingested_at"
+      freshness:
+        warn_after: {count: 2, period: hour}
+        error_after: {count: 6, period: hour}
+
+    tables:
+      - name: ride_status_history
+      - name: ride_location
+      - name: ride_tracking_point
+      - name: ride_fare
+      - name: ride_fare_component
+      - name: promo_usage
+      - name: role
+      - name: payment_method_type
+      - name: promotion
+      - name: user_account
+      - name: user_role
+      - name: driver_document
+      - name: vehicle
+      - name: driver_vehicle_assignment
+      - name: user_payment_method
+      - name: review
+      - name: payment_refund

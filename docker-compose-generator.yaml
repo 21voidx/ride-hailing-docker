@@ -1,136 +1,85 @@
+# docker-compose-generator.fixed.yaml
+# Data generator + PostgreSQL source DB.
+# Service ini berbagi external network ride-network dengan Airflow/Trino.
+
+---
 services:
-  generator:
-    build: ./data-generator
-    container_name: data-generator
-    environment:
-      # DATABASE_URL: postgresql://ride_user:ride_pass@postgres:5432/ride_db
-      DATABASE_URL: postgresql://postgres:postgres@postgres-ops:5432/ride_ops_pg
-      TZ: Asia/Jakarta
-
-      # Lightweight defaults. Naikkan perlahan kalau laptop kuat.
-      SEED_RIDERS: 120
-      SEED_DRIVERS: 35
-      SEED_PROMOTIONS: 8
-
-      # Real-time generator control.
-      RIDES_PER_MINUTE: 2
-      MAX_CONCURRENT_RIDES: 6
-
-      # Time realism:
-      # 1 simulated minute = 0.5 real seconds.
-      # Timestamp di database tetap maju menit/jam seperti ride nyata.
-      SIM_SECONDS_PER_MINUTE: 0.5
-      SIM_START_DAYS_AGO: 3
-
-      # Tracking ringan:
-      TRACKING_INTERVAL_SIM_MINUTES: 10
-      MAX_TRACKING_POINTS_PER_RIDE: 12
-      LOG_LEVEL: INFO
-    depends_on:
-      postgres-ops:
-        condition: service_healthy
-    mem_limit: 384m
-    cpus: 0.75
-    networks:
-      - taxi-network
-
   postgres-ops:
     image: postgres:14-alpine
-    container_name: taxi-postgres-ops
+    container_name: postgres-ops
     environment:
-      POSTGRES_DB: ride_ops_pg
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5433:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-ride_ops_pg}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TZ: Asia/Jakarta
+    ports: ["5433:5432"]
     volumes:
       - postgres-ops-data:/var/lib/postgresql/data
       - ./data-generator/init_postgres.sql:/docker-entrypoint-initdb.d/init_postgres.sql:ro
-    command: >
-      postgres
-        -c wal_level=logical
-        -c max_replication_slots=10
-        -c max_wal_senders=10
-        -c wal_keep_size=1024
-        -c shared_preload_libraries=pgoutput
-        -c log_replication_commands=on
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ride_ops_pg"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ride_ops_pg}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    mem_limit: 768m
-    cpus: 1.0
+      start_period: 20s
     networks:
-      - taxi-network
+      - ride-network
 
-  # mongodb:
-  #   image: mongo:latest
-  #   container_name: mongodb
-  #   command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
-  #   ports:
-  #     - "27017:27017"
-  #   volumes:
-  #     - mongodb-data:/data/db
-  #   healthcheck:
-  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 10s
-  #   networks:
-  #     - taxi-network
+  mysql-billing:
+    image: mysql:8-debian
+    container_name: mysql-billing
+    command: --default-authentication-plugin=mysql_native_password --binlog-format=ROW
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-billing_growth_db}
+      MYSQL_USER: ${MYSQL_USER:-ride_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ride_pass}
+      TZ: Asia/Jakarta
+    ports: ["3307:3306"]
+    volumes:
+      - mysql-billing-data:/var/lib/mysql
+      - ./data-generator/init_mysql.sql:/docker-entrypoint-initdb.d/init_mysql.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER:-ride_user}", "-p${MYSQL_PASSWORD:-ride_pass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ride-network
 
-  # mongo-express:
-  #   image: mongo-express:latest
-  #   container_name: mongo-express
-  #   environment:
-  #     ME_CONFIG_MONGODB_URL: mongodb://mongodb:27017/
-  #     # ME_CONFIG_MONGODB_SERVER: mongodb
-  #     # ME_CONFIG_MONGODB_PORT: 27017
-  #     # ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME:-mongo_admin}
-  #     # ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-mongo_password}
-  #     ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-express_user}
-  #     ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-express_password}
-  #   ports:
-  #     - "8086:8081"
-  #   networks:
-  #     - taxi-network
-  #   depends_on:
-  #     mongodb:
-  #       condition: service_healthy
-        
-  # mongodb-rs-init:
-  #   image: mongo:latest
-  #   container_name: mongodb-rs-init
-  #   networks:
-  #     - taxi-network
-  #   depends_on:
-  #     mongodb:
-  #       condition: service_healthy
-  #   restart: "no"
-  #   entrypoint: >
-  #     bash -c "
-  #       echo 'Initiating replica set ...' &&
-  #       mongosh --host mongodb:27017 --eval '
-  #         rs.initiate({
-  #           _id: \"rs0\",
-  #           members: [{ _id: 0, host: \"mongodb:27017\" }]
-  #         })
-  #       ' || true &&
-  #       sleep 5 &&
-  #       echo 'Seeding collections ...' &&
-  #       mongosh --host mongodb:27017 /scripts/init_mongodb.js
-  #     "
-  #   volumes:
-  #     - ./data-generator/mongodb/init_mongodb.js:/scripts/init_mongodb.js:ro
+  data-generator:
+    build: ./data-generator
+    container_name: data-generator
+    environment:
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-ops:5432/${POSTGRES_DB:-ride_ops_pg}
+      MYSQL_HOST: mysql-billing
+      MYSQL_PORT: 3306
+      MYSQL_DB: ${MYSQL_DATABASE:-billing_growth_db}
+      MYSQL_USER: ${MYSQL_USER:-ride_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ride_pass}
+      TZ: Asia/Jakarta
+      GENERATOR_MODE: ${GENERATOR_MODE:-portfolio}
+      SIM_START_AT: ${SIM_START_AT:-2024-01-01T00:00:00+07:00}
+      SIM_SECONDS_PER_MINUTE: ${SIM_SECONDS_PER_MINUTE:-0.5}
+      RIDES_PER_MINUTE: ${RIDES_PER_MINUTE:-3}
+      SEED_RIDERS: ${SEED_RIDERS:-600}
+      SEED_DRIVERS: ${SEED_DRIVERS:-180}
+      SEED_PROMOTIONS: ${SEED_PROMOTIONS:-12}
+      ENABLE_MAINTENANCE_EVENTS: ${ENABLE_MAINTENANCE_EVENTS:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres-ops:
+        condition: service_healthy
+      mysql-billing:
+        condition: service_healthy
+    networks: 
+      - ride-network
 
 networks:
-  taxi-network:
-    # driver: bridge
+  ride-network:
     external: true
 
 volumes:
   postgres-ops-data:
-  # mongodb-data:
+  mysql-billing-data:

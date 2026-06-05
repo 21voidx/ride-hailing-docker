@@ -1,58 +1,61 @@
-import asyncio
 import logging
 import os
 import random
 import string
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
+import psycopg
+import pymysql
 from faker import Faker
-from psycopg_pool import AsyncConnectionPool
 
 fake = Faker("id_ID")
 JKT = timezone(timedelta(hours=7))
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres-ops:5432/ride_ops_pg")
-SEED_RIDERS = int(os.getenv("SEED_RIDERS", "120"))
-SEED_DRIVERS = int(os.getenv("SEED_DRIVERS", "35"))
-SEED_PROMOTIONS = int(os.getenv("SEED_PROMOTIONS", "8"))
-RIDES_PER_MINUTE = float(os.getenv("RIDES_PER_MINUTE", "4"))
-MAX_CONCURRENT_RIDES = int(os.getenv("MAX_CONCURRENT_RIDES", "12"))
-SIM_SECONDS_PER_MINUTE = float(os.getenv("SIM_SECONDS_PER_MINUTE", "0.12"))
-SIM_START_DAYS_AGO = int(os.getenv("SIM_START_DAYS_AGO", "3"))
-TRACKING_INTERVAL_SIM_MINUTES = int(os.getenv("TRACKING_INTERVAL_SIM_MINUTES", "3"))
-MAX_TRACKING_POINTS_PER_RIDE = int(os.getenv("MAX_TRACKING_POINTS_PER_RIDE", "24"))
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "postgresql://postgres:postgres@postgres-ops:5432/ride_ops_pg")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "mysql-billing")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_DB = os.getenv("MYSQL_DB", "billing_growth_db")
+MYSQL_USER = os.getenv("MYSQL_USER", "ride_user")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "ride_pass")
+
+GENERATOR_MODE = os.getenv("GENERATOR_MODE", "portfolio")
+SIM_START_AT = os.getenv("SIM_START_AT", "2024-01-01T00:00:00+07:00")
+SIM_SECONDS_PER_MINUTE = float(os.getenv("SIM_SECONDS_PER_MINUTE", "0.5"))
+RIDES_PER_MINUTE = float(os.getenv("RIDES_PER_MINUTE", "3"))
+MAX_CONCURRENT_RIDES = int(os.getenv("MAX_CONCURRENT_RIDES", "10"))
+SEED_RIDERS = int(os.getenv("SEED_RIDERS", "600"))
+SEED_DRIVERS = int(os.getenv("SEED_DRIVERS", "180"))
+SEED_PROMOTIONS = int(os.getenv("SEED_PROMOTIONS", "12"))
+ENABLE_MAINTENANCE_EVENTS = os.getenv("ENABLE_MAINTENANCE_EVENTS", "true").lower() == "true"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
-    format="%(asctime)s %(levelname)s %(message)s",
-)
-logger = logging.getLogger("ride-generator")
+logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("portfolio-generator")
 
-# Rough bounding box around Jakarta.
-LAT_MIN, LAT_MAX = -6.35, -6.08
-LON_MIN, LON_MAX = 106.65, 106.95
+CITY_BOX = {
+    "JKT": (-6.35, -6.08, 106.65, 106.95),
+    "BDG": (-6.98, -6.82, 107.55, 107.75),
+    "SBY": (-7.35, -7.20, 112.65, 112.85),
+}
+CITY_WEIGHTS = {"JKT": 0.62, "BDG": 0.20, "SBY": 0.18}
 
 @dataclass
-class DriverAssignment:
+class Driver:
     driver_id: int
-    user_id: int
     vehicle_id: int
     vehicle_type: str
+    city_code: str
 
 class SimClock:
-    """Maps real elapsed time to simulated timestamps.
-
-    The generator sleeps using scaled time, but timestamps in PostgreSQL
-    represent realistic ride timelines: accepted minutes after request,
-    completed tens of minutes later, payments after completion, and so on.
-    """
-
-    def __init__(self, start_days_ago: int, sim_seconds_per_minute: float):
-        self.sim_start = datetime.now(JKT) - timedelta(days=start_days_ago)
+    def __init__(self, start_at: str, sim_seconds_per_minute: float):
+        dt = datetime.fromisoformat(start_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=JKT)
+        self.sim_start = dt.astimezone(JKT)
         self.real_start = datetime.now(JKT)
         self.sim_seconds_per_minute = sim_seconds_per_minute
 
@@ -61,606 +64,457 @@ class SimClock:
         sim_minutes = real_elapsed / self.sim_seconds_per_minute
         return self.sim_start + timedelta(minutes=sim_minutes)
 
-    async def sleep_sim_minutes(self, minutes: float):
-        await asyncio.sleep(max(0.02, minutes * self.sim_seconds_per_minute))
+    def sleep_sim_minutes(self, minutes: float):
+        time.sleep(max(0.02, minutes * self.sim_seconds_per_minute))
 
-
-def money(value: float) -> Decimal:
+def money(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+def mysql_dt(dt: datetime):
+    if not dt:
+        return None
+    return dt.astimezone(JKT).replace(tzinfo=None)
 
 def plate() -> str:
-    letters = "".join(random.choices(string.ascii_uppercase, k=random.choice([2, 3])))
     digits = random.randint(1000, 9999)
     suffix = "".join(random.choices(string.ascii_uppercase, k=random.choice([2, 3])))
     return f"B {digits} {suffix}"
 
+def pg_conn():
+    return psycopg.connect(POSTGRES_DSN)
 
-def rand_point():
-    return (round(random.uniform(LAT_MIN, LAT_MAX), 6), round(random.uniform(LON_MIN, LON_MAX), 6))
+def my_conn():
+    return pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DB, autocommit=False)
 
+def fetch_one_pg(conn, sql, params=None):
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        row = cur.fetchone()
+        return row[0] if row else None
 
-def interpolate(a, b, ratio):
-    return round(a + (b - a) * ratio, 6)
+def fetch_all_pg(conn, sql, params=None):
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        return cur.fetchall()
 
+def fetch_all_mysql(conn, sql, params=None):
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        return cur.fetchall()
 
-async def fetch_scalar(conn, sql, params=None):
-    cur = await conn.execute(sql, params or ())
-    row = await cur.fetchone()
-    return row[0] if row else None
+def choose_city(now: datetime) -> str:
+    # Jakarta becomes more dominant during rush hour.
+    hour = now.hour
+    weights = CITY_WEIGHTS.copy()
+    if hour in range(7, 10) or hour in range(17, 21):
+        weights["JKT"] += 0.10
+        weights["BDG"] -= 0.04
+        weights["SBY"] -= 0.06
+    cities, probs = zip(*weights.items())
+    return random.choices(cities, weights=probs, k=1)[0]
 
+def choose_service(now: datetime, city: str) -> str:
+    hour = now.hour
+    is_weekend = now.weekday() >= 5
+    base = {"BIKE": 0.58, "CAR": 0.34, "XL": 0.08}
+    if hour in range(7, 10):
+        base["BIKE"] += 0.12; base["CAR"] -= 0.08; base["XL"] -= 0.04
+    if is_weekend:
+        base["BIKE"] -= 0.10; base["CAR"] += 0.06; base["XL"] += 0.04
+    if city == "JKT" and hour in range(17, 21):
+        base["BIKE"] += 0.06; base["CAR"] -= 0.02; base["XL"] -= 0.04
+    keys, vals = zip(*base.items())
+    return random.choices(keys, weights=vals, k=1)[0]
 
-async def seed_reference_data(pool: AsyncConnectionPool, clock: SimClock):
-    async with pool.connection() as conn:
-        existing_users = await fetch_scalar(conn, "SELECT count(*) FROM user_account")
-        if existing_users and existing_users >= SEED_RIDERS + SEED_DRIVERS:
-            logger.info("Seed data already exists: %s users", existing_users)
+def business_context(now: datetime, city: str):
+    hour = now.hour
+    is_peak = hour in range(7, 10) or hour in range(17, 21)
+    is_weekend = now.weekday() >= 5
+    rain = city == "JKT" and (hour in range(16, 19)) and random.random() < 0.28
+    payment_incident = city == "SBY" and hour in range(19, 21) and random.random() < 0.25
+    promo_boost = now.day % 10 in (1, 2, 3)
+    return {
+        "is_peak": is_peak,
+        "is_weekend": is_weekend,
+        "rain": rain,
+        "payment_incident": payment_incident,
+        "promo_boost": promo_boost,
+    }
+
+def rand_point(city):
+    lat_min, lat_max, lon_min, lon_max = CITY_BOX[city]
+    return round(random.uniform(lat_min, lat_max), 6), round(random.uniform(lon_min, lon_max), 6)
+
+def seed_sources(clock: SimClock):
+    with pg_conn() as pg, my_conn() as my:
+        existing = fetch_one_pg(pg, "select count(*) from rider_account")
+        if existing and existing >= SEED_RIDERS:
+            logger.info("Seed already exists: riders=%s", existing)
             return
-
-        logger.info("Seeding riders=%s drivers=%s promotions=%s", SEED_RIDERS, SEED_DRIVERS, SEED_PROMOTIONS)
-        base_time = clock.now() - timedelta(days=30)
-
-        # Admin system user.
-        admin_id = await fetch_scalar(
-            conn,
-            """
-            INSERT INTO user_account
-            (username,email,phone_number,password_hash,account_status,email_verified_at,phone_verified_at,last_login_at,created_at,updated_at)
-            VALUES (%s,%s,%s,%s,'ACTIVE',%s,%s,%s,%s,%s)
-            ON CONFLICT (username) DO UPDATE SET updated_at = EXCLUDED.updated_at
-            RETURNING user_id
-            """,
-            ("admin_system", "admin@example.test", "+6280000000000", "demo_hash_not_for_prod", base_time, base_time, base_time, base_time, base_time),
-        )
-
-        role_ids = {}
-        cur = await conn.execute("SELECT role_id, role_code FROM role")
-        for row in await cur.fetchall():
-            role_ids[row[1]] = row[0]
-
-        rider_ids = []
-        for i in range(SEED_RIDERS):
-            created_at = base_time + timedelta(minutes=i * random.randint(3, 11))
-            username = f"rider_{i+1:05d}"
-            email = f"{username}@example.test"
-            phone = f"+62813{10000000+i:08d}"
-            user_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO user_account
-                (username,email,phone_number,password_hash,account_status,email_verified_at,phone_verified_at,last_login_at,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,'ACTIVE',%s,%s,%s,%s,%s)
-                ON CONFLICT (username) DO NOTHING
-                RETURNING user_id
-                """,
-                (username, email, phone, "demo_hash_not_for_prod", created_at + timedelta(minutes=3), created_at + timedelta(minutes=4), created_at, created_at, created_at),
-            )
-            if user_id:
-                rider_ids.append(user_id)
-                await conn.execute(
+        base = clock.now() - timedelta(days=90)
+        logger.info("Seeding source systems: riders=%s drivers=%s promotions=%s", SEED_RIDERS, SEED_DRIVERS, SEED_PROMOTIONS)
+        with pg.cursor() as cur:
+            for i in range(SEED_RIDERS):
+                city = random.choices(list(CITY_WEIGHTS), weights=list(CITY_WEIGHTS.values()), k=1)[0]
+                created = base + timedelta(minutes=i * random.randint(2, 8))
+                cur.execute(
                     """
-                    INSERT INTO user_role(user_id,role_id,assigned_at,assigned_by,is_active)
-                    VALUES (%s,%s,%s,%s,true)
-                    ON CONFLICT DO NOTHING
+                    insert into rider_account(username, full_name, email, phone_number, account_status, city_code, created_at, updated_at)
+                    values(%s,%s,%s,%s,'ACTIVE',%s,%s,%s)
+                    on conflict(username) do nothing
                     """,
-                    (user_id, role_ids["RIDER"], created_at, admin_id),
+                    (f"rider_{i+1:05d}", fake.name(), f"rider_{i+1:05d}@example.test", f"+62813{10000000+i:08d}", city, created, created)
                 )
-
-        makes = [("Toyota","Avanza","CAR",6),("Honda","Brio","CAR",4),("Daihatsu","Xenia","CAR",6),("Yamaha","NMAX","BIKE",1),("Honda","Vario","BIKE",1),("Toyota","Innova","XL",7)]
-        for i in range(SEED_DRIVERS):
-            created_at = base_time + timedelta(minutes=i * random.randint(5, 17))
-            username = f"driver_{i+1:05d}"
-            user_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO user_account
-                (username,email,phone_number,password_hash,account_status,email_verified_at,phone_verified_at,last_login_at,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,'ACTIVE',%s,%s,%s,%s,%s)
-                ON CONFLICT (username) DO NOTHING
-                RETURNING user_id
-                """,
-                (
-                    username, f"{username}@example.test", f"+62817{10000000+i:08d}",
-                    "demo_hash_not_for_prod", created_at + timedelta(minutes=3), created_at + timedelta(minutes=4),
-                    created_at, created_at, created_at,
-                ),
-            )
-            if not user_id:
-                continue
-
-            await conn.execute(
-                """
-                INSERT INTO user_role(user_id,role_id,assigned_at,assigned_by,is_active)
-                VALUES (%s,%s,%s,%s,true)
-                ON CONFLICT DO NOTHING
-                """,
-                (user_id, role_ids["DRIVER"], created_at, admin_id),
-            )
-
-            driver_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO driver_profile
-                (user_id,license_number,license_expiry,driver_status,verification_status,verified_at,rating_avg,rating_count,created_at,updated_at)
-                VALUES (%s,%s,%s,'AVAILABLE','VERIFIED',%s,%s,%s,%s,%s)
-                RETURNING driver_id
-                """,
-                (
-                    user_id, f"SIM-{i+1:06d}", (created_at + timedelta(days=365*3)).date(),
-                    created_at + timedelta(days=1), money(random.uniform(4.65, 5.00)), random.randint(5, 280),
-                    created_at, created_at,
-                ),
-            )
-
-            for doc_type in ["KTP", "SIM", "STNK"]:
-                await conn.execute(
+            makes = {
+                "BIKE": [("Yamaha", "NMAX"), ("Honda", "Vario"), ("Honda", "Beat")],
+                "CAR": [("Toyota", "Avanza"), ("Honda", "Brio"), ("Daihatsu", "Xenia")],
+                "XL": [("Toyota", "Innova"), ("Toyota", "Voxy")]
+            }
+            for i in range(SEED_DRIVERS):
+                city = random.choices(list(CITY_WEIGHTS), weights=list(CITY_WEIGHTS.values()), k=1)[0]
+                vtype = random.choices(["BIKE", "CAR", "XL"], weights=[0.55, 0.36, 0.09], k=1)[0]
+                created = base + timedelta(minutes=i * random.randint(5, 15))
+                cur.execute(
                     """
-                    INSERT INTO driver_document
-                    (driver_id,document_type,document_number,document_file_url,verification_status,submitted_at,verified_at,verified_by,expires_at,created_at,updated_at)
-                    VALUES (%s,%s,%s,%s,'VERIFIED',%s,%s,%s,%s,%s,%s)
+                    insert into driver_profile(driver_name, phone_number, city_code, driver_status, verification_status, rating_avg, rating_count, created_at, updated_at)
+                    values(%s,%s,%s,'AVAILABLE','VERIFIED',%s,%s,%s,%s)
+                    returning driver_id
                     """,
+                    (fake.name(), f"+62817{10000000+i:08d}", city, money(random.uniform(4.55, 5.00)), random.randint(10, 500), created, created)
+                )
+                driver_id = cur.fetchone()[0]
+                make, model = random.choice(makes[vtype])
+                cur.execute(
+                    """
+                    insert into vehicle(driver_id, license_plate, vehicle_type, vehicle_make, vehicle_model, vehicle_year, vehicle_status, created_at, updated_at)
+                    values(%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s) returning vehicle_id
+                    """,
+                    (driver_id, plate(), vtype, make, model, random.randint(2016, 2025), created, created)
+                )
+                vehicle_id = cur.fetchone()[0]
+                cur.execute(
+                    """insert into driver_vehicle_assignment(driver_id, vehicle_id, assigned_from, is_active, created_at, updated_at)
+                    values(%s,%s,%s,true,%s,%s)""",
+                    (driver_id, vehicle_id, created, created, created)
+                )
+        pg.commit()
+        with my.cursor() as cur:
+            for rider_id in range(1, SEED_RIDERS + 1):
+                n_methods = random.choice([1, 1, 2])
+                for j in range(n_methods):
+                    method = random.choice(["EWALLET", "CARD", "BANK_TRANSFER", "CASH"])
+                    provider = {"EWALLET": "demo_ewallet", "CARD": "demo_card", "BANK_TRANSFER": "demo_bank", "CASH": "cash"}[method]
+                    cur.execute(
+                        """insert into payment_method(rider_id, method_code, provider_name, masked_account, payment_method_status, is_default, created_at, updated_at)
+                        values(%s,%s,%s,%s,'ACTIVE',%s,%s,%s)""",
+                        (rider_id, method, provider, "****" + str(random.randint(1000,9999)), j == 0, mysql_dt(base), mysql_dt(base))
+                    )
+            for i in range(SEED_PROMOTIONS):
+                valid_from = mysql_dt(clock.now() - timedelta(days=30))
+                valid_to = mysql_dt(clock.now() + timedelta(days=730))
+                dtype = random.choice(["PERCENT", "FIXED"])
+                cur.execute(
+                    """insert into promotion(promo_code, promo_description, discount_type, discount_pct, discount_amount, max_discount_amount, min_fare_amount, valid_from, valid_to, promotion_status, created_at, updated_at)
+                    values(%s,%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s)""",
                     (
-                        driver_id, doc_type, f"{doc_type}-{i+1:06d}", f"s3://demo-driver-docs/{driver_id}/{doc_type.lower()}.jpg",
-                        created_at, created_at + timedelta(hours=6), admin_id, (created_at + timedelta(days=365*3)).date(),
-                        created_at, created_at + timedelta(hours=6),
-                    ),
+                        f"PORTO{i+1:02d}", f"Portfolio promo {i+1}", dtype,
+                        money(random.choice([5, 10, 15, 20])) if dtype == "PERCENT" else None,
+                        money(random.choice([5000, 10000, 15000])) if dtype == "FIXED" else None,
+                        money(random.choice([12000, 20000, 25000])), money(random.choice([20000, 30000, 40000])),
+                        valid_from, valid_to, mysql_dt(base), mysql_dt(base)
+                    )
                 )
-
-            make, model, vtype, capacity = random.choice(makes)
-            if vtype == "BIKE" and random.random() < 0.4:
-                make, model, vtype, capacity = random.choice([("Yamaha","NMAX","BIKE",1),("Honda","Vario","BIKE",1),("Honda","Beat","BIKE",1)])
-            vehicle_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO vehicle
-                (license_plate,vehicle_make,vehicle_model,vehicle_year,vehicle_capacity,vehicle_color,vehicle_type,vehicle_status,verified_at,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s,%s)
-                RETURNING vehicle_id
-                """,
-                (plate(), make, model, random.randint(2015, 2025), capacity, random.choice(["Black","White","Silver","Red","Blue"]), vtype, created_at + timedelta(days=1), created_at, created_at),
-            )
-            await conn.execute(
-                """
-                INSERT INTO driver_vehicle_assignment(driver_id,vehicle_id,assigned_from,assigned_to,is_active,created_at,updated_at)
-                VALUES (%s,%s,%s,NULL,true,%s,%s)
-                """,
-                (driver_id, vehicle_id, created_at + timedelta(days=1), created_at + timedelta(days=1), created_at + timedelta(days=1)),
-            )
-
-        payment_type_ids = {}
-        cur = await conn.execute("SELECT payment_method_type_id, method_code FROM payment_method_type")
-        for row in await cur.fetchall():
-            payment_type_ids[row[1]] = row[0]
-
-        cur = await conn.execute("SELECT user_id FROM user_account WHERE username LIKE 'rider_%'")
-        seeded_riders = [r[0] for r in await cur.fetchall()]
-        for user_id in seeded_riders:
-            n_methods = random.choice([1, 1, 2])
-            methods = random.sample(list(payment_type_ids.items()), n_methods)
-            for method_code, method_id in methods:
-                await conn.execute(
-                    """
-                    INSERT INTO user_payment_method
-                    (user_id,payment_method_type_id,provider_name,provider_customer_id,provider_payment_token,masked_account,expiry_month,expiry_year,is_default,payment_method_status,created_at,updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s)
-                    """,
-                    (
-                        user_id, method_id, "demo_gateway" if method_code != "CASH" else "cash",
-                        f"cust_{user_id}", f"tok_{uuid.uuid4().hex}", "****" + str(random.randint(1000, 9999)),
-                        random.randint(1, 12), random.randint(2027, 2035), True,
-                        base_time, base_time,
-                    ),
-                )
-
-        for i in range(SEED_PROMOTIONS):
-            valid_from = clock.now() - timedelta(days=10)
-            valid_to = clock.now() + timedelta(days=60)
-            discount_type = random.choice(["PERCENT", "FIXED"])
-            pct = money(random.choice([5, 10, 15, 20])) if discount_type == "PERCENT" else None
-            fixed = money(random.choice([5000, 10000, 15000])) if discount_type == "FIXED" else None
-            await conn.execute(
-                """
-                INSERT INTO promotion
-                (promo_code,promo_description,discount_type,discount_pct,discount_amount,max_discount_amount,min_fare_amount,usage_limit_total,usage_limit_per_user,valid_from,valid_to,promotion_status,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s)
-                ON CONFLICT (promo_code) DO NOTHING
-                """,
-                (
-                    f"RIDE{i+1:02d}", f"Demo promo {i+1}", discount_type, pct, fixed,
-                    money(random.choice([10000, 15000, 20000])), money(random.choice([20000, 30000, 40000])),
-                    random.randint(200, 1000), random.randint(1, 3), valid_from, valid_to, base_time, base_time,
-                ),
-            )
-
-        await conn.commit()
+        my.commit()
         logger.info("Seed completed")
 
+def load_riders(city=None):
+    with pg_conn() as conn:
+        if city:
+            rows = fetch_all_pg(conn, "select rider_id from rider_account where account_status='ACTIVE' and city_code=%s and deleted_at is null", (city,))
+        else:
+            rows = fetch_all_pg(conn, "select rider_id from rider_account where account_status='ACTIVE' and deleted_at is null")
+        return [r[0] for r in rows]
 
-async def load_pools(pool: AsyncConnectionPool):
-    async with pool.connection() as conn:
-        cur = await conn.execute("SELECT user_id FROM user_account WHERE username LIKE 'rider_%' AND account_status='ACTIVE'")
-        riders = [r[0] for r in await cur.fetchall()]
+def load_drivers(city, service_type):
+    with pg_conn() as conn:
+        rows = fetch_all_pg(conn, """
+            select d.driver_id, v.vehicle_id, v.vehicle_type, d.city_code
+            from driver_profile d
+            join vehicle v on v.driver_id = d.driver_id and v.vehicle_status='ACTIVE' and v.deleted_at is null
+            where d.city_code=%s and d.driver_status in ('AVAILABLE','OFFLINE') and d.verification_status='VERIFIED' and d.deleted_at is null
+              and v.vehicle_type=%s
+        """, (city, service_type))
+        return [Driver(*r) for r in rows]
 
-        cur = await conn.execute(
-            """
-            SELECT dp.driver_id, dp.user_id, dva.vehicle_id, v.vehicle_type
-            FROM driver_profile dp
-            JOIN driver_vehicle_assignment dva ON dp.driver_id = dva.driver_id AND dva.is_active = true
-            JOIN vehicle v ON dva.vehicle_id = v.vehicle_id
-            WHERE dp.driver_status IN ('AVAILABLE','OFFLINE') AND dp.verification_status='VERIFIED'
-            """
+def load_promos(now):
+    with my_conn() as conn:
+        rows = fetch_all_mysql(conn, """
+            select promotion_id, promo_code, discount_type, coalesce(discount_pct,0), coalesce(discount_amount,0), coalesce(max_discount_amount,0), coalesce(min_fare_amount,0)
+            from promotion
+            where promotion_status='ACTIVE' and valid_from <= %s and valid_to >= %s and deleted_at is null
+        """, (mysql_dt(now), mysql_dt(now)))
+        return rows
+
+def insert_status(pg, ride_id, old_status, new_status, who_type, who_id, changed_at, reason=None, note=None):
+    with pg.cursor() as cur:
+        cur.execute(
+            """insert into ride_status_history(ride_id, old_status, new_status, changed_by_type, changed_by_id, reason_code, reason_note, changed_at, created_at)
+            values(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (ride_id, old_status, new_status, who_type, who_id, reason, note, changed_at, changed_at)
         )
-        drivers = [DriverAssignment(*r) for r in await cur.fetchall()]
 
-        cur = await conn.execute("SELECT promotion_id, discount_type, COALESCE(discount_pct,0), COALESCE(discount_amount,0), COALESCE(max_discount_amount,0), min_fare_amount FROM promotion WHERE promotion_status='ACTIVE'")
-        promotions = await cur.fetchall()
-
-        return riders, drivers, promotions
-
-
-async def insert_status(conn, ride_id, old, new, changed_by, changed_at, reason_code=None, reason_note=None):
-    await conn.execute(
-        """
-        INSERT INTO ride_status_history
-        (ride_id,old_status,new_status,changed_by_user_id,reason_code,reason_note,changed_at,created_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        (ride_id, old, new, changed_by, reason_code, reason_note, changed_at, changed_at),
-    )
-
-
-def fare_breakdown(distance_km, duration_min, service_type, discount=Decimal("0.00")):
-    if service_type == "BIKE":
-        base, per_km, per_min = 7000, 2400, 250
-    elif service_type == "XL":
-        base, per_km, per_min = 15000, 5200, 600
-    else:
-        base, per_km, per_min = 10000, 3800, 450
-
-    surge_multiplier = Decimal(str(random.choice([1.0, 1.0, 1.0, 1.1, 1.2, 1.35]))).quantize(Decimal("0.01"))
+def fare_breakdown(distance_km, duration_min, service_type, context, discount=Decimal("0.00")):
+    if service_type == "BIKE": base, per_km, per_min = 7000, 2400, 250
+    elif service_type == "XL": base, per_km, per_min = 15000, 5200, 600
+    else: base, per_km, per_min = 10000, 3800, 450
+    surge_choices = [1.0, 1.0, 1.0, 1.1, 1.2]
+    if context["is_peak"]: surge_choices += [1.25, 1.35]
+    if context["rain"]: surge_choices += [1.35, 1.5]
+    surge_multiplier = Decimal(str(random.choice(surge_choices))).quantize(Decimal("0.01"))
     base_fare = money(base)
     distance_fare = money(float(distance_km) * per_km)
     time_fare = money(float(duration_min) * per_min)
     before_surge = base_fare + distance_fare + time_fare
-    surge_amount = money(float(before_surge) * (float(surge_multiplier) - 1))
-    tax_amount = money(float(before_surge + surge_amount - discount) * 0.11)
-    platform_fee = money(float(before_surge + surge_amount) * 0.18)
-    total_fare = money(max(0, float(before_surge + surge_amount + tax_amount - discount)))
-    driver_earning = money(max(0, float(total_fare - platform_fee)))
+    surge_amount = money(before_surge * (surge_multiplier - Decimal("1.00")))
+    taxable = max(Decimal("0"), before_surge + surge_amount - discount)
+    tax_amount = money(taxable * Decimal("0.11"))
+    total_fare = money(taxable + tax_amount)
+    platform_fee = money((before_surge + surge_amount) * Decimal("0.18"))
+    driver_earning = money(max(Decimal("0"), total_fare - platform_fee))
     return {
         "base_fare": base_fare, "distance_fare": distance_fare, "time_fare": time_fare,
-        "surge_multiplier": surge_multiplier, "surge_amount": surge_amount,
-        "discount_amount": discount, "tax_amount": tax_amount, "platform_fee": platform_fee,
-        "driver_earning": driver_earning, "total_fare": total_fare,
+        "surge_multiplier": surge_multiplier, "surge_amount": surge_amount, "discount_amount": discount,
+        "tax_amount": tax_amount, "platform_fee": platform_fee, "driver_earning": driver_earning, "total_fare": total_fare,
     }
 
+def apply_promo(ride_id, rider_id, preliminary_fare, context, completed_at):
+    promos = load_promos(completed_at)
+    if not promos:
+        return Decimal("0.00"), None
+    chance = 0.18 + (0.18 if context["promo_boost"] else 0)
+    if random.random() > chance:
+        return Decimal("0.00"), None
+    promo = random.choice(promos)
+    promotion_id, promo_code, dtype, pct, fixed, max_discount, min_fare = promo
+    if preliminary_fare < Decimal(str(min_fare)):
+        return Decimal("0.00"), None
+    if dtype == "PERCENT":
+        discount = min(money(preliminary_fare * Decimal(str(pct)) / Decimal("100")), Decimal(str(max_discount)))
+    else:
+        discount = min(Decimal(str(fixed)), Decimal(str(max_discount)))
+    return money(discount), promo
 
-async def generate_one_ride(pool: AsyncConnectionPool, clock: SimClock, ride_no: int):
-    riders, drivers, promotions = await load_pools(pool)
-    if not riders or not drivers:
-        logger.warning("Missing seed pools. riders=%s drivers=%s", len(riders), len(drivers))
+def create_payment_and_growth(ride_id, rider_id, driver_id, amount, status_hint, context, fare, completed_at):
+    with my_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select payment_method_id, method_code, provider_name from payment_method where rider_id=%s and payment_method_status='ACTIVE' order by is_default desc, payment_method_id limit 1", (rider_id,))
+            pm = cur.fetchone()
+            payment_method_id, method_code, provider_name = pm if pm else (None, "CASH", "cash")
+            incident_failed = context["payment_incident"] and method_code in ("EWALLET", "CARD")
+            status = "FAILED" if status_hint == "PAYMENT_FAILED" or incident_failed else random.choices(["PAID", "FAILED"], weights=[96,4], k=1)[0]
+            failure_code = None
+            if status == "FAILED":
+                failure_code = random.choice(["INSUFFICIENT_BALANCE", "GATEWAY_TIMEOUT", "CARD_DECLINED", "EWALLET_PROVIDER_DOWN"] if incident_failed else ["INSUFFICIENT_BALANCE", "GATEWAY_TIMEOUT", "CARD_DECLINED"])
+            payment_at = completed_at + timedelta(minutes=random.uniform(0.2, 4.0))
+            cur.execute(
+                """insert into payment_transaction(ride_id, rider_id, payment_method_id, provider_name, provider_transaction_id, idempotency_key, amount, method_fee, payment_status, failure_code, failure_message, authorized_at, captured_at, paid_at, created_at, updated_at)
+                values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    ride_id, rider_id, payment_method_id, provider_name,
+                    f"pay_{uuid.uuid4().hex}" if status == "PAID" else None,
+                    f"ride-{ride_id}-{uuid.uuid4().hex}", amount, money(amount * Decimal("0.01")), status, failure_code,
+                    f"Demo {failure_code}" if failure_code else None,
+                    mysql_dt(payment_at if status == "PAID" else None), mysql_dt(payment_at if status == "PAID" else None), mysql_dt(payment_at if status == "PAID" else None),
+                    mysql_dt(payment_at), mysql_dt(payment_at)
+                )
+            )
+            payment_transaction_id = cur.lastrowid
+            if status == "PAID" and random.random() < 0.10:
+                rating = random.choices([5,4,3,2,1], weights=[70,20,7,2,1], k=1)[0]
+                review_at = completed_at + timedelta(minutes=random.uniform(2, 180))
+                cur.execute(
+                    """insert into review(ride_id, reviewer_type, reviewer_id, reviewee_type, reviewee_id, rating_score, comments, review_status, created_at, updated_at)
+                    values(%s,'RIDER',%s,'DRIVER',%s,%s,%s,'PUBLISHED',%s,%s)""",
+                    (ride_id, rider_id, driver_id, rating, random.choice(["Good trip", "Clean vehicle", "Driver late", "Smooth ride", None]), mysql_dt(review_at), mysql_dt(review_at))
+                )
+                if rating <= 2:
+                    cur.execute(
+                        """insert into support_ticket(ride_id, rider_id, driver_id, ticket_category, ticket_status, priority, opened_at, created_at, updated_at)
+                        values(%s,%s,%s,'LOW_RATING_COMPLAINT','OPEN','HIGH',%s,%s,%s)""",
+                        (ride_id, rider_id, driver_id, mysql_dt(review_at), mysql_dt(review_at), mysql_dt(review_at))
+                    )
+                    if random.random() < 0.45:
+                        refund_amt = money(amount * Decimal(str(random.choice([0.25, 0.5, 1.0]))))
+                        cur.execute(
+                            """insert into payment_refund(payment_transaction_id, ride_id, refund_amount, refund_reason_code, refund_status, requested_at, processed_at, created_at, updated_at)
+                            values(%s,%s,%s,'SERVICE_QUALITY','PROCESSED',%s,%s,%s,%s)""",
+                            (payment_transaction_id, ride_id, refund_amt, mysql_dt(review_at), mysql_dt(review_at + timedelta(minutes=20)), mysql_dt(review_at), mysql_dt(review_at + timedelta(minutes=20)))
+                        )
+            if random.random() < 0.015:
+                # Rare soft-delete review to demonstrate delete-like data changes safely.
+                cur.execute("update review set review_status='DELETED', deleted_at=%s, updated_at=%s where ride_id=%s order by review_id desc limit 1", (mysql_dt(completed_at + timedelta(hours=1)), mysql_dt(completed_at + timedelta(hours=1)), ride_id))
+        conn.commit()
+        return status
+
+def maybe_driver_maintenance(now):
+    if not ENABLE_MAINTENANCE_EVENTS or random.random() > 0.03:
         return
+    with pg_conn() as conn:
+        rows = fetch_all_pg(conn, "select driver_id from driver_profile where deleted_at is null order by random() limit 1")
+        if not rows:
+            return
+        driver_id = rows[0][0]
+        status = random.choice(["OFFLINE", "AVAILABLE", "SUSPENDED"])
+        with conn.cursor() as cur:
+            cur.execute("update driver_profile set driver_status=%s, updated_at=%s where driver_id=%s", (status, now, driver_id))
+            cur.execute("insert into driver_shift(driver_id, shift_status, started_at, ended_at, created_at, updated_at) values(%s,%s,%s,%s,%s,%s)", (driver_id, status, now, None if status != "OFFLINE" else now + timedelta(hours=2), now, now))
+        conn.commit()
+        logger.info("Driver maintenance event driver=%s status=%s", driver_id, status)
 
+def generate_one_ride(clock: SimClock):
+    now = clock.now()
+    city = choose_city(now)
+    service_type = choose_service(now, city)
+    context = business_context(now, city)
+    riders = load_riders(city) or load_riders()
+    drivers = load_drivers(city, service_type)
+    if not riders or not drivers:
+        logger.warning("Missing pools city=%s service=%s riders=%s drivers=%s", city, service_type, len(riders), len(drivers))
+        return
     rider_id = random.choice(riders)
     driver = random.choice(drivers)
-    service_type = driver.vehicle_type
-    requested_at = clock.now()
-
+    requested_at = now
+    pickup = rand_point(city); dropoff = rand_point(city)
     distance_km = money(random.uniform(1.5, 38.0))
     duration_min = money(float(distance_km) * random.uniform(2.0, 4.5) + random.uniform(4.0, 12.0))
-    pickup = rand_point()
-    dropoff = rand_point()
-
-    # Lifecycle durations in simulated minutes. These values create realistic DB timestamps.
-    accept_delay = random.uniform(0.5, 6.5)
-    arrive_delay = random.uniform(2.0, 18.0)
+    accept_delay = random.uniform(0.5, 5.5) + (2.5 if context["is_peak"] else 0) + (2.5 if context["rain"] else 0)
+    arrive_delay = random.uniform(2.0, 16.0) + (4.0 if context["rain"] else 0)
     pickup_wait = random.uniform(0.5, 7.0)
     ride_duration = max(5.0, float(duration_min) * random.uniform(0.75, 1.35))
-    payment_delay = random.uniform(0.2, 4.0)
-    review_delay = random.uniform(1.0, 180.0)
 
-    outcome = random.choices(
-        population=["COMPLETED", "RIDER_CANCEL_BEFORE_ACCEPT", "RIDER_CANCEL_AFTER_ACCEPT", "DRIVER_CANCEL", "PAYMENT_FAILED"],
-        weights=[82, 4, 5, 4, 5],
-        k=1,
-    )[0]
+    weights = {"COMPLETED": 82, "RIDER_CANCEL_BEFORE_ACCEPT": 4, "RIDER_CANCEL_AFTER_ACCEPT": 5, "DRIVER_CANCEL": 4, "PAYMENT_FAILED": 5}
+    if context["rain"]: weights["COMPLETED"] -= 8; weights["RIDER_CANCEL_AFTER_ACCEPT"] += 4; weights["DRIVER_CANCEL"] += 4
+    if context["payment_incident"]: weights["PAYMENT_FAILED"] += 10; weights["COMPLETED"] -= 10
+    outcome = random.choices(list(weights), weights=list(weights.values()), k=1)[0]
 
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            ride_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO ride
-                (rider_id,driver_id,vehicle_id,ride_status,service_type,city_code,requested_at,estimated_distance_km,estimated_duration_min,created_at,updated_at)
-                VALUES (%s,NULL,NULL,'REQUESTED',%s,'JKT',%s,%s,%s,%s,%s)
-                RETURNING ride_id
-                """,
-                (rider_id, service_type, requested_at, distance_km, duration_min, requested_at, requested_at),
+    with pg_conn() as pg:
+        with pg.cursor() as cur:
+            cur.execute(
+                """insert into ride(rider_id, driver_id, vehicle_id, ride_status, service_type, city_code, requested_at, estimated_distance_km, estimated_duration_min, created_at, updated_at)
+                values(%s, null, null, 'REQUESTED', %s, %s, %s, %s, %s, %s, %s) returning ride_id""",
+                (rider_id, service_type, city, requested_at, distance_km, duration_min, requested_at, requested_at)
             )
-            await insert_status(conn, ride_id, None, "REQUESTED", rider_id, requested_at)
-            await conn.execute(
-                """
-                INSERT INTO ride_location(ride_id,location_type,latitude,longitude,address_text,place_id,captured_at,created_at)
-                VALUES
-                (%s,'PICKUP_REQUESTED',%s,%s,%s,%s,%s,%s),
-                (%s,'DROPOFF_REQUESTED',%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    ride_id, pickup[0], pickup[1], fake.street_address(), f"place_{uuid.uuid4().hex[:12]}", requested_at, requested_at,
-                    ride_id, dropoff[0], dropoff[1], fake.street_address(), f"place_{uuid.uuid4().hex[:12]}", requested_at, requested_at,
-                ),
+            ride_id = cur.fetchone()[0]
+            insert_status(pg, ride_id, None, "REQUESTED", "RIDER", rider_id, requested_at)
+            cur.execute(
+                """insert into ride_location(ride_id, location_type, latitude, longitude, address_text, captured_at, created_at) values
+                (%s,'PICKUP_REQUESTED',%s,%s,%s,%s,%s),
+                (%s,'DROPOFF_REQUESTED',%s,%s,%s,%s,%s)""",
+                (ride_id, pickup[0], pickup[1], fake.street_address(), requested_at, requested_at, ride_id, dropoff[0], dropoff[1], fake.street_address(), requested_at, requested_at)
             )
+        pg.commit()
 
-    logger.info("Ride %s REQUESTED at %s", ride_id, requested_at.isoformat())
-    await clock.sleep_sim_minutes(accept_delay)
-
+    clock.sleep_sim_minutes(accept_delay)
     if outcome == "RIDER_CANCEL_BEFORE_ACCEPT":
         cancelled_at = requested_at + timedelta(minutes=random.uniform(1.0, 5.0))
-        async with pool.connection() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
-                    UPDATE ride
-                    SET ride_status='CANCELLED', cancelled_at=%s, cancelled_by_user_id=%s,
-                        cancel_reason_code='RIDER_CHANGED_MIND', cancel_reason_note='Rider cancelled before driver accepted',
-                        updated_at=%s
-                    WHERE ride_id=%s
-                    """,
-                    (cancelled_at, rider_id, cancelled_at, ride_id),
-                )
-                await insert_status(conn, ride_id, "REQUESTED", "CANCELLED", rider_id, cancelled_at, "RIDER_CHANGED_MIND")
-        logger.info("Ride %s CANCELLED before accept at %s", ride_id, cancelled_at.isoformat())
+        with pg_conn() as pg:
+            with pg.cursor() as cur:
+                cur.execute("update ride set ride_status='CANCELLED', cancelled_at=%s, cancelled_by_type='RIDER', cancel_reason_code='RIDER_CHANGED_MIND', updated_at=%s where ride_id=%s", (cancelled_at, cancelled_at, ride_id))
+                insert_status(pg, ride_id, "REQUESTED", "CANCELLED", "RIDER", rider_id, cancelled_at, "RIDER_CHANGED_MIND")
+            pg.commit()
         return
 
     accepted_at = requested_at + timedelta(minutes=accept_delay)
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                """
-                UPDATE ride
-                SET ride_status='ACCEPTED', driver_id=%s, vehicle_id=%s, accepted_at=%s, updated_at=%s
-                WHERE ride_id=%s
-                """,
-                (driver.driver_id, driver.vehicle_id, accepted_at, accepted_at, ride_id),
-            )
-            await conn.execute("UPDATE driver_profile SET driver_status='ON_RIDE', updated_at=%s WHERE driver_id=%s", (accepted_at, driver.driver_id))
-            await insert_status(conn, ride_id, "REQUESTED", "ACCEPTED", driver.user_id, accepted_at)
-    logger.info("Ride %s ACCEPTED at %s", ride_id, accepted_at.isoformat())
+    with pg_conn() as pg:
+        with pg.cursor() as cur:
+            cur.execute("update ride set ride_status='ACCEPTED', driver_id=%s, vehicle_id=%s, accepted_at=%s, updated_at=%s where ride_id=%s", (driver.driver_id, driver.vehicle_id, accepted_at, accepted_at, ride_id))
+            cur.execute("update driver_profile set driver_status='ON_RIDE', updated_at=%s where driver_id=%s", (accepted_at, driver.driver_id))
+            insert_status(pg, ride_id, "REQUESTED", "ACCEPTED", "DRIVER", driver.driver_id, accepted_at)
+        pg.commit()
 
     if outcome in ("RIDER_CANCEL_AFTER_ACCEPT", "DRIVER_CANCEL"):
         cancel_wait = random.uniform(1.0, 8.0)
-        await clock.sleep_sim_minutes(cancel_wait)
+        clock.sleep_sim_minutes(cancel_wait)
         cancelled_at = accepted_at + timedelta(minutes=cancel_wait)
-        cancelled_by = rider_id if outcome == "RIDER_CANCEL_AFTER_ACCEPT" else driver.user_id
         reason = "RIDER_NO_LONGER_NEEDED" if outcome == "RIDER_CANCEL_AFTER_ACCEPT" else "DRIVER_VEHICLE_ISSUE"
-        async with pool.connection() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
-                    UPDATE ride
-                    SET ride_status='CANCELLED', cancelled_at=%s, cancelled_by_user_id=%s,
-                        cancel_reason_code=%s, cancel_reason_note=%s, updated_at=%s
-                    WHERE ride_id=%s
-                    """,
-                    (cancelled_at, cancelled_by, reason, outcome.replace("_", " "), cancelled_at, ride_id),
-                )
-                await conn.execute("UPDATE driver_profile SET driver_status='AVAILABLE', updated_at=%s WHERE driver_id=%s", (cancelled_at, driver.driver_id))
-                await insert_status(conn, ride_id, "ACCEPTED", "CANCELLED", cancelled_by, cancelled_at, reason)
-        logger.info("Ride %s CANCELLED after accept at %s", ride_id, cancelled_at.isoformat())
+        who = "RIDER" if outcome == "RIDER_CANCEL_AFTER_ACCEPT" else "DRIVER"
+        who_id = rider_id if who == "RIDER" else driver.driver_id
+        with pg_conn() as pg:
+            with pg.cursor() as cur:
+                cur.execute("update ride set ride_status='CANCELLED', cancelled_at=%s, cancelled_by_type=%s, cancel_reason_code=%s, updated_at=%s where ride_id=%s", (cancelled_at, who, reason, cancelled_at, ride_id))
+                cur.execute("update driver_profile set driver_status='AVAILABLE', updated_at=%s where driver_id=%s", (cancelled_at, driver.driver_id))
+                insert_status(pg, ride_id, "ACCEPTED", "CANCELLED", who, who_id, cancelled_at, reason)
+            pg.commit()
         return
 
-    await clock.sleep_sim_minutes(arrive_delay)
+    clock.sleep_sim_minutes(arrive_delay)
     arrived_at = accepted_at + timedelta(minutes=arrive_delay)
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE ride SET ride_status='ARRIVED', arrived_at=%s, updated_at=%s WHERE ride_id=%s",
-                (arrived_at, arrived_at, ride_id),
-            )
-            await conn.execute(
-                """
-                INSERT INTO ride_location(ride_id,location_type,latitude,longitude,address_text,place_id,captured_at,created_at)
-                VALUES (%s,'PICKUP_ACTUAL',%s,%s,%s,%s,%s,%s)
-                """,
-                (ride_id, pickup[0], pickup[1], fake.street_address(), f"place_{uuid.uuid4().hex[:12]}", arrived_at, arrived_at),
-            )
-            await insert_status(conn, ride_id, "ACCEPTED", "ARRIVED", driver.user_id, arrived_at)
+    with pg_conn() as pg:
+        with pg.cursor() as cur:
+            cur.execute("update ride set ride_status='ARRIVED', arrived_at=%s, updated_at=%s where ride_id=%s", (arrived_at, arrived_at, ride_id))
+            cur.execute("insert into ride_location(ride_id, location_type, latitude, longitude, address_text, captured_at, created_at) values(%s,'PICKUP_ACTUAL',%s,%s,%s,%s,%s)", (ride_id, pickup[0], pickup[1], fake.street_address(), arrived_at, arrived_at))
+            insert_status(pg, ride_id, "ACCEPTED", "ARRIVED", "DRIVER", driver.driver_id, arrived_at)
+        pg.commit()
 
-    await clock.sleep_sim_minutes(pickup_wait)
+    clock.sleep_sim_minutes(pickup_wait)
     started_at = arrived_at + timedelta(minutes=pickup_wait)
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE ride SET ride_status='IN_PROGRESS', started_at=%s, updated_at=%s WHERE ride_id=%s",
-                (started_at, started_at, ride_id),
-            )
-            await insert_status(conn, ride_id, "ARRIVED", "IN_PROGRESS", driver.user_id, started_at)
+    with pg_conn() as pg:
+        with pg.cursor() as cur:
+            cur.execute("update ride set ride_status='IN_PROGRESS', started_at=%s, updated_at=%s where ride_id=%s", (started_at, started_at, ride_id))
+            insert_status(pg, ride_id, "ARRIVED", "IN_PROGRESS", "DRIVER", driver.driver_id, started_at)
+        pg.commit()
 
-    # Insert tracking points while the ride is in progress. DB timestamps are spread over the actual simulated trip.
-    points = min(MAX_TRACKING_POINTS_PER_RIDE, max(2, int(ride_duration // TRACKING_INTERVAL_SIM_MINUTES)))
+    points = min(12, max(2, int(ride_duration // 10)))
     for idx in range(points):
-        ratio = (idx + 1) / points
-        recorded_at = started_at + timedelta(minutes=ride_duration * ratio)
-        lat = interpolate(pickup[0], dropoff[0], ratio) + round(random.uniform(-0.0015, 0.0015), 6)
-        lon = interpolate(pickup[1], dropoff[1], ratio) + round(random.uniform(-0.0015, 0.0015), 6)
-        async with pool.connection() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
-                    INSERT INTO ride_tracking_point
-                    (ride_id,driver_id,latitude,longitude,speed_kmh,heading_degree,accuracy_meter,recorded_at,created_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    (
-                        ride_id, driver.driver_id, round(lat, 6), round(lon, 6),
-                        money(random.uniform(8, 55)), money(random.uniform(0, 359)), money(random.uniform(3, 18)),
-                        recorded_at, recorded_at,
-                    ),
-                )
-        await clock.sleep_sim_minutes(TRACKING_INTERVAL_SIM_MINUTES)
+        recorded_at = started_at + timedelta(minutes=ride_duration * ((idx + 1) / points))
+        lat = pickup[0] + (dropoff[0] - pickup[0]) * ((idx + 1) / points) + random.uniform(-0.001, 0.001)
+        lon = pickup[1] + (dropoff[1] - pickup[1]) * ((idx + 1) / points) + random.uniform(-0.001, 0.001)
+        with pg_conn() as pg:
+            with pg.cursor() as cur:
+                cur.execute("insert into ride_tracking_point(ride_id, driver_id, latitude, longitude, speed_kmh, recorded_at, created_at) values(%s,%s,%s,%s,%s,%s,%s)", (ride_id, driver.driver_id, round(lat,6), round(lon,6), money(random.uniform(8,55)), recorded_at, recorded_at))
+            pg.commit()
+        clock.sleep_sim_minutes(10)
 
     completed_at = started_at + timedelta(minutes=ride_duration)
-    fare = fare_breakdown(distance_km, duration_min, service_type)
-    promo_row = random.choice(promotions) if promotions and random.random() < 0.25 else None
-    discount = Decimal("0.00")
-    if promo_row:
-        promo_id, discount_type, pct, fixed, max_discount, min_fare = promo_row
-        preliminary = fare["total_fare"]
-        if preliminary >= min_fare:
-            if discount_type == "PERCENT":
-                discount = min(money(float(preliminary) * float(pct) / 100.0), max_discount)
-            else:
-                discount = min(fixed, max_discount)
-            fare = fare_breakdown(distance_km, duration_min, service_type, discount)
+    preliminary_fare = fare_breakdown(distance_km, duration_min, service_type, context)
+    discount, promo = apply_promo(ride_id, rider_id, preliminary_fare["total_fare"], context, completed_at)
+    fare = fare_breakdown(distance_km, duration_min, service_type, context, discount)
+    final_status = "PAYMENT_FAILED" if outcome == "PAYMENT_FAILED" else "COMPLETED"
 
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                """
-                UPDATE ride
-                SET ride_status=%s, completed_at=%s, updated_at=%s
-                WHERE ride_id=%s
-                """,
-                ("PAYMENT_FAILED" if outcome == "PAYMENT_FAILED" else "COMPLETED", completed_at, completed_at, ride_id),
+    with pg_conn() as pg:
+        with pg.cursor() as cur:
+            cur.execute("update ride set ride_status=%s, completed_at=%s, updated_at=%s where ride_id=%s", (final_status, completed_at, completed_at, ride_id))
+            cur.execute("insert into ride_location(ride_id, location_type, latitude, longitude, address_text, captured_at, created_at) values(%s,'DROPOFF_ACTUAL',%s,%s,%s,%s,%s)", (ride_id, dropoff[0], dropoff[1], fake.street_address(), completed_at, completed_at))
+            insert_status(pg, ride_id, "IN_PROGRESS", final_status, "SYSTEM", None, completed_at, None)
+            cur.execute(
+                """insert into ride_fare(ride_id, fare_type, fare_version, distance_km, duration_min, base_fare, distance_fare, time_fare, surge_multiplier, surge_amount, discount_amount, tax_amount, platform_fee, driver_earning, total_fare, fare_rule_code, calculated_at, created_at, updated_at)
+                values(%s,'FINAL',1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (ride_id, distance_km, duration_min, fare["base_fare"], fare["distance_fare"], fare["time_fare"], fare["surge_multiplier"], fare["surge_amount"], fare["discount_amount"], fare["tax_amount"], fare["platform_fee"], fare["driver_earning"], fare["total_fare"], f"{city}_{service_type}_V1", completed_at, completed_at, completed_at)
             )
-            await conn.execute(
-                """
-                INSERT INTO ride_location(ride_id,location_type,latitude,longitude,address_text,place_id,captured_at,created_at)
-                VALUES (%s,'DROPOFF_ACTUAL',%s,%s,%s,%s,%s,%s)
-                """,
-                (ride_id, dropoff[0], dropoff[1], fake.street_address(), f"place_{uuid.uuid4().hex[:12]}", completed_at, completed_at),
-            )
-            await insert_status(conn, ride_id, "IN_PROGRESS", "COMPLETED" if outcome != "PAYMENT_FAILED" else "PAYMENT_FAILED", driver.user_id, completed_at)
+            cur.execute("update driver_profile set driver_status='AVAILABLE', rating_count=rating_count+1, updated_at=%s where driver_id=%s", (completed_at, driver.driver_id))
+        pg.commit()
 
-            fare_id = await fetch_scalar(
-                conn,
-                """
-                INSERT INTO ride_fare
-                (ride_id,fare_type,fare_version,currency_code,distance_km,duration_min,base_fare,distance_fare,time_fare,
-                 surge_multiplier,surge_amount,discount_amount,tax_amount,platform_fee,driver_earning,total_fare,fare_rule_code,calculated_at,created_at)
-                VALUES (%s,'FINAL',1,'IDR',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING fare_id
-                """,
-                (
-                    ride_id, distance_km, duration_min, fare["base_fare"], fare["distance_fare"], fare["time_fare"],
-                    fare["surge_multiplier"], fare["surge_amount"], fare["discount_amount"], fare["tax_amount"],
-                    fare["platform_fee"], fare["driver_earning"], fare["total_fare"], f"JKT_{service_type}_V1", completed_at, completed_at,
-                ),
-            )
-            components = [
-                ("BASE", "Base fare", fare["base_fare"]),
-                ("DISTANCE", "Distance fare", fare["distance_fare"]),
-                ("TIME", "Time fare", fare["time_fare"]),
-                ("SURGE", "Surge amount", fare["surge_amount"]),
-                ("DISCOUNT", "Discount", -fare["discount_amount"]),
-                ("TAX", "Tax", fare["tax_amount"]),
-                ("PLATFORM_FEE", "Platform fee", fare["platform_fee"]),
-            ]
-            for code, name, amount in components:
-                await conn.execute(
-                    """
-                    INSERT INTO ride_fare_component(fare_id,component_code,component_name,component_amount,description,created_at)
-                    VALUES (%s,%s,%s,%s,%s,%s)
-                    """,
-                    (fare_id, code, name, amount, f"{name} component", completed_at),
-                )
-            if promo_row and discount > 0:
-                await conn.execute(
-                    """
-                    INSERT INTO promo_usage(promotion_id,ride_id,rider_id,discount_amount_applied,used_at,created_at)
-                    VALUES (%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT (ride_id) DO NOTHING
-                    """,
-                    (promo_row[0], ride_id, rider_id, discount, completed_at, completed_at),
-                )
+    if promo and discount > 0:
+        with my_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("insert ignore into promo_usage(promotion_id, ride_id, rider_id, discount_amount_applied, used_at, created_at, updated_at) values(%s,%s,%s,%s,%s,%s,%s)", (promo[0], ride_id, rider_id, discount, mysql_dt(completed_at), mysql_dt(completed_at), mysql_dt(completed_at)))
+            conn.commit()
 
-            await conn.execute("UPDATE driver_profile SET driver_status='AVAILABLE', updated_at=%s WHERE driver_id=%s", (completed_at, driver.driver_id))
+    payment_status = create_payment_and_growth(ride_id, rider_id, driver.driver_id, fare["total_fare"], outcome, context, fare, completed_at)
+    logger.info("ride_id=%s city=%s service=%s final=%s payment=%s fare=%s", ride_id, city, service_type, final_status, payment_status, fare["total_fare"])
 
-    await clock.sleep_sim_minutes(payment_delay)
-    payment_at = completed_at + timedelta(minutes=payment_delay)
-
-    async with pool.connection() as conn:
-        cur = await conn.execute(
-            """
-            SELECT user_payment_method_id
-            FROM user_payment_method
-            WHERE user_id=%s AND payment_method_status='ACTIVE'
-            ORDER BY is_default DESC, user_payment_method_id
-            LIMIT 1
-            """,
-            (rider_id,),
-        )
-        row = await cur.fetchone()
-        user_payment_method_id = row[0] if row else None
-
-        async with conn.transaction():
-            status = "FAILED" if outcome == "PAYMENT_FAILED" else random.choices(["PAID", "FAILED"], [96, 4])[0]
-            failure_code = None if status == "PAID" else random.choice(["INSUFFICIENT_BALANCE", "GATEWAY_TIMEOUT", "CARD_DECLINED"])
-            provider_tx = f"pay_{uuid.uuid4().hex}" if status == "PAID" else None
-            await conn.execute(
-                """
-                INSERT INTO payment_transaction
-                (ride_id,user_payment_method_id,provider_name,provider_transaction_id,idempotency_key,amount,method_fee,currency_code,
-                 payment_status,failure_code,failure_message,authorized_at,captured_at,paid_at,created_at,updated_at)
-                VALUES (%s,%s,'demo_gateway',%s,%s,%s,%s,'IDR',%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    ride_id, user_payment_method_id, provider_tx, f"ride-{ride_id}-{uuid.uuid4().hex}",
-                    fare["total_fare"], money(float(fare["total_fare"]) * 0.01),
-                    status, failure_code, f"Demo {failure_code}" if failure_code else None,
-                    payment_at if status == "PAID" else None, payment_at if status == "PAID" else None, payment_at if status == "PAID" else None,
-                    payment_at, payment_at,
-                ),
-            )
-
-    if outcome != "PAYMENT_FAILED" and random.random() < 0.65:
-        await clock.sleep_sim_minutes(min(review_delay, 10))  # don't hold local demo tasks too long
-        review_at = completed_at + timedelta(minutes=review_delay)
-        async with pool.connection() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
-                    INSERT INTO review
-                    (ride_id,reviewer_id,reviewee_id,review_type,rating_score,comments,created_at,updated_at)
-                    VALUES (%s,%s,%s,'RIDER_TO_DRIVER',%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    (
-                        ride_id, rider_id, driver.user_id,
-                        random.choices([5, 4, 3, 2, 1], [72, 20, 6, 1, 1])[0],
-                        random.choice(["Good driver", "Clean vehicle", "Fast trip", "Smooth ride", None]),
-                        review_at, review_at,
-                    ),
-                )
-
-    logger.info("Ride %s finished outcome=%s requested=%s completed=%s", ride_id, outcome, requested_at.isoformat(), completed_at.isoformat())
-
-
-async def ride_spawner(pool: AsyncConnectionPool, clock: SimClock):
-    active = set()
-    ride_no = 0
+def main():
+    clock = SimClock(SIM_START_AT, SIM_SECONDS_PER_MINUTE)
+    seed_sources(clock)
+    logger.info("Generator started mode=%s sim_start=%s", GENERATOR_MODE, clock.sim_start.isoformat())
     spawn_interval_sim_min = 1.0 / max(RIDES_PER_MINUTE, 0.1)
-
     while True:
-        active = {t for t in active if not t.done()}
-        if len(active) < MAX_CONCURRENT_RIDES:
-            ride_no += 1
-            task = asyncio.create_task(generate_one_ride(pool, clock, ride_no))
-            active.add(task)
-            task.add_done_callback(lambda t: logger.exception("Ride task failed", exc_info=t.exception()) if t.exception() else None)
-        await clock.sleep_sim_minutes(spawn_interval_sim_min)
-
-
-async def main():
-    clock = SimClock(SIM_START_DAYS_AGO, SIM_SECONDS_PER_MINUTE)
-    async with AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=8, open=False) as pool:
-        await pool.open()
-        await seed_reference_data(pool, clock)
-        logger.info("Generator started. Sim timestamp starts around %s", clock.now().isoformat())
-        await ride_spawner(pool, clock)
+        maybe_driver_maintenance(clock.now())
+        generate_one_ride(clock)
+        clock.sleep_sim_minutes(spawn_interval_sim_min)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         logger.info("Generator stopped")

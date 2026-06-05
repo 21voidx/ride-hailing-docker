@@ -26,6 +26,26 @@ models:
       - name: _cdc_lsn
         tests: [not_null]
 
+  - name: stg_ride_events
+    description: "CDC event stream ride dari ride_events. Tidak di-deduplicate per ride_id. Grain: 1 row per ride status transition, dipakai oleh fct_ride_status_events."
+    columns:
+      - name: ride_status_event_id
+        tests: [not_null, unique]
+      - name: ride_cdc_event_sk
+        tests: [not_null, unique]
+      - name: ride_id
+        tests: [not_null]
+      - name: new_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: changed_at
+        tests: [not_null]
+      - name: _cdc_lsn
+        tests: [not_null]
+
+
   - name: stg_driver_profile
     description: "State terbaru driver profile dari CDC events (driver_profile_events). Timestamps di-cast dari STRING Debezium ke TIMESTAMP. Deduplicated: 1 row per driver_id, ambil LSN tertinggi."
     columns:

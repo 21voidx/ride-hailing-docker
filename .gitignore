@@ -52,3 +52,5 @@ dbt/dbt_project/logs/
 dbt/dbt_project/target/
 dbt/dbt_project/REVIEW_NOTES.md
 
+ride_hailing_batch_project/
+ride_hailing_batch_project_v2/

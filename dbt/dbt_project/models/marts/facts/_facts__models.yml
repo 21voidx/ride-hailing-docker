@@ -58,12 +58,14 @@ models:
                 min_value: 0
 
   - name: fct_ride_status_events
-    description: "Event fact table. Grain: 1 row per ride status event dari ride_status_history. Cocok untuk analisis funnel, durasi antarstatus, dan bottleneck operasional."
+    description: "Event fact table. Grain: 1 row per ride status event yang diturunkan dari CDC ride_events melalui stg_ride_events. Cocok untuk analisis funnel, durasi antarstatus, dan bottleneck operasional realtime."
     columns:
       - name: ride_status_event_sk
         tests: [not_null, unique]
-      - name: ride_status_history_id
+      - name: ride_status_event_id
         tests: [not_null, unique]
+      - name: ride_cdc_event_sk
+        tests: [not_null]
       - name: ride_id
         tests: [not_null]
       - name: status_event_date_key
@@ -76,6 +78,8 @@ models:
           - accepted_values:
               arguments:
                 values: ['REQUESTED','ACCEPTED','ARRIVED','IN_PROGRESS','COMPLETED','CANCELLED','PAYMENT_FAILED']
+      - name: changed_at
+        tests: [not_null]
       - name: status_event_count
         tests:
           - dbt_utils.accepted_range:

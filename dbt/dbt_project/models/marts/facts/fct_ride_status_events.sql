@@ -1,7 +1,9 @@
 -- Fact: Ride Status Events
 -- Grain    : 1 row per ride status event
--- Source   : Batch ride_status_history + current ride state
+-- Source   : CDC ride_events via stg_ride_events
 -- Strategy : incremental merge by ride_status_event_sk
+-- Notes    : Jangan mengambil dari stg_ride, karena stg_ride adalah current-state
+--            1 row per ride setelah dedup CDC. Status event harus memakai event stream.
 
 {{
     config(
@@ -32,13 +34,16 @@ with source_watermark as (
 
 changed_ride_ids as (
     select distinct ride_id
-    from {{ ref('stg_ride_status_history') }}
-    where created_at >= (select watermark from source_watermark)
+    from {{ ref('stg_ride_events') }}
+    where greatest(
+        coalesce(updated_at, timestamp('1900-01-01')),
+        coalesce(_cdc_source_ts, timestamp('1900-01-01'))
+    ) >= (select watermark from source_watermark)
 ),
 
 events as (
     select e.*
-    from {{ ref('stg_ride_status_history') }} e
+    from {{ ref('stg_ride_events') }} e
     {% if is_incremental() %}
         inner join changed_ride_ids c on e.ride_id = c.ride_id
     {% endif %}
@@ -49,46 +54,38 @@ sequenced as (
         e.*,
         row_number() over (
             partition by ride_id
-            order by changed_at, ride_status_history_id
+            order by changed_at, _cdc_source_ts, _cdc_lsn
         ) as status_sequence,
         lead(changed_at) over (
             partition by ride_id
-            order by changed_at, ride_status_history_id
+            order by changed_at, _cdc_source_ts, _cdc_lsn
         ) as next_changed_at
     from events e
 ),
 
-rides as (
-    select
-        ride_id,
-        rider_id,
-        driver_id,
-        vehicle_id,
-        service_type,
-        city_code,
-        requested_at,
-        completed_at,
-        cancelled_at,
-        updated_at as ride_updated_at
-    from {{ ref('stg_ride') }}
-),
-
 dim_user as (
-    select user_id, user_sk from {{ ref('dim_user') }}
+    select user_id, user_sk
+    from {{ ref('dim_user') }}
 ),
 
 dim_driver as (
-    select driver_id, driver_sk from {{ ref('dim_driver') }}
+    select
+        driver_id,
+        driver_sk,
+        user_id as driver_user_id
+    from {{ ref('dim_driver') }}
 ),
 
 dim_vehicle as (
-    select vehicle_id, vehicle_sk from {{ ref('dim_vehicle') }}
+    select vehicle_id, vehicle_sk
+    from {{ ref('dim_vehicle') }}
 ),
 
 final as (
     select
-        {{ dbt_utils.generate_surrogate_key(['s.ride_status_history_id']) }} as ride_status_event_sk,
-        s.ride_status_history_id,
+        {{ dbt_utils.generate_surrogate_key(['s.ride_status_event_id']) }} as ride_status_event_sk,
+        s.ride_status_event_id,
+        s.ride_cdc_event_sk,
         s.ride_id,
 
         du.user_sk as rider_sk,
@@ -98,14 +95,20 @@ final as (
 
         cast(format_date('%Y%m%d', date(s.changed_at, '{{ var("reporting_timezone", "Asia/Jakarta") }}')) as int64) as status_event_date_key,
 
-        r.service_type,
-        r.city_code,
+        s.service_type,
+        s.city_code,
         s.old_status,
         s.new_status,
         s.reason_code,
         s.reason_note,
         s.status_sequence,
-        s.changed_by_user_id,
+
+        case
+            when s.new_status = 'REQUESTED' then s.rider_id
+            when s.new_status = 'CANCELLED' then s.cancelled_by_user_id
+            when s.new_status in ('ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'PAYMENT_FAILED') then dd.driver_user_id
+            else null
+        end as changed_by_user_id,
 
         s.new_status in ('COMPLETED', 'CANCELLED', 'PAYMENT_FAILED') as is_terminal_status,
         s.old_status is null as is_initial_status,
@@ -117,21 +120,32 @@ final as (
 
         1 as status_event_count,
         timestamp_diff(s.next_changed_at, s.changed_at, second) as seconds_until_next_status,
-        timestamp_diff(s.changed_at, r.requested_at, second) as seconds_since_request,
+        timestamp_diff(s.changed_at, s.requested_at, second) as seconds_since_request,
 
+        s._cdc_op,
+        s._cdc_lsn,
+        s._cdc_source_ts,
         s.created_at as status_event_created_at,
+        s.updated_at as status_event_updated_at,
+
         greatest(
-            coalesce(s.created_at, timestamp('1900-01-01')),
-            coalesce(r.ride_updated_at, timestamp('1900-01-01'))
+            coalesce(s.updated_at, timestamp('1900-01-01')),
+            coalesce(s._cdc_source_ts, timestamp('1900-01-01'))
         ) as _last_source_updated_at,
         current_timestamp() as _dbt_loaded_at
 
     from sequenced s
-    left join rides r on s.ride_id = r.ride_id
-    left join dim_user du on r.rider_id = du.user_id
-    left join dim_user dcu on s.changed_by_user_id = dcu.user_id
-    left join dim_driver dd on r.driver_id = dd.driver_id
-    left join dim_vehicle dv on r.vehicle_id = dv.vehicle_id
+    left join dim_user du on s.rider_id = du.user_id
+    left join dim_driver dd on s.driver_id = dd.driver_id
+    left join dim_vehicle dv on s.vehicle_id = dv.vehicle_id
+    left join dim_user dcu on (
+        case
+            when s.new_status = 'REQUESTED' then s.rider_id
+            when s.new_status = 'CANCELLED' then s.cancelled_by_user_id
+            when s.new_status in ('ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'PAYMENT_FAILED') then dd.driver_user_id
+            else null
+        end
+    ) = dcu.user_id
 )
 
 select * from final

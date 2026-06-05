@@ -6,7 +6,7 @@ import pendulum
 from airflow.sdk import DAG, Param, chain
 from airflow.timetables.interval import CronDataIntervalTimetable
 from airflow.providers.standard.operators.empty import EmptyOperator
-from helpers.refactored_trino_helper import TableConfig, make_table_task_group
+from helpers.refactored_trino_helper_v2 import TableConfig, make_table_task_group
 
 DAG_ID = "ingest_mysql_to_bq_trino_weekly"
 SOURCE_TZ = "Asia/Jakarta"

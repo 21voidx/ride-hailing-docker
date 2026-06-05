@@ -244,7 +244,7 @@ with DAG(
     start_date=pendulum.datetime(2023, 10, 1, tz="Asia/Jakarta"),
     end_date=pendulum.datetime(2024, 3, 2, tz="Asia/Jakarta"),
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone=SOURCE_TZ),
-    catchup=False,
+    catchup=True,
     max_active_runs=1,
     tags=["ride-hailing", "bronze", "mysql", "trino", "bigquery"],
     params={

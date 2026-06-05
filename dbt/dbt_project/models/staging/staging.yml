@@ -1,0 +1,100 @@
+version: 2
+
+models:
+  - name: stg_rider_account
+    description: SCD2 staging view for riders from dbt snapshot.
+    columns:
+      - name: rider_snapshot_id
+        tests: [not_null, unique]
+      - name: rider_id
+        tests: [not_null]
+      - name: account_status
+        tests:
+          - accepted_values:
+              values: ['ACTIVE', 'SUSPENDED', 'DELETED']
+
+  - name: stg_driver_profile
+    columns:
+      - name: driver_snapshot_id
+        tests: [not_null, unique]
+      - name: driver_id
+        tests: [not_null]
+      - name: rating_avg
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 5
+
+  - name: stg_vehicle
+    columns:
+      - name: vehicle_snapshot_id
+        tests: [not_null, unique]
+      - name: vehicle_id
+        tests: [not_null]
+      - name: vehicle_type
+        tests:
+          - accepted_values:
+              values: ['BIKE', 'CAR', 'XL']
+
+  - name: stg_driver_vehicle_assignment
+    columns:
+      - name: assignment_snapshot_id
+        tests: [not_null, unique]
+      - name: assignment_id
+        tests: [not_null]
+
+  - name: stg_payment_method
+    columns:
+      - name: payment_method_snapshot_id
+        tests: [not_null, unique]
+      - name: payment_method_id
+        tests: [not_null]
+      - name: method_code
+        tests:
+          - accepted_values:
+              values: ['EWALLET', 'CARD', 'BANK_TRANSFER', 'CASH']
+
+  - name: stg_promotion
+    columns:
+      - name: promotion_snapshot_id
+        tests: [not_null, unique]
+      - name: promotion_id
+        tests: [not_null]
+
+  - name: stg_ride
+    columns:
+      - name: ride_id
+        tests: [not_null, unique]
+      - name: ride_status
+        tests:
+          - accepted_values:
+              values: ['REQUESTED', 'ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'PAYMENT_FAILED']
+
+  - name: stg_ride_fare
+    columns:
+      - name: fare_id
+        tests: [not_null, unique]
+      - name: total_fare
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              strictly: false
+
+  - name: stg_payment_transaction
+    columns:
+      - name: payment_transaction_id
+        tests: [not_null, unique]
+      - name: idempotency_key
+        tests: [not_null, unique]
+      - name: payment_status
+        tests:
+          - accepted_values:
+              values: ['PAID', 'FAILED']
+
+  - name: stg_promo_usage
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['ride_id']
+    columns:
+      - name: promo_usage_id
+        tests: [not_null, unique]

@@ -1,37 +1,19 @@
--- Staging: Vehicle
--- Source    : Batch → dev_bronze_pg.vehicle
--- Strategy  : Upsert. Satu baris per vehicle_id (state terbaru).
--- Notes     : Timestamps sudah bertipe TIMESTAMP (bukan STRING).
-
-with source as (
-    select * from {{ source('ride_ops_batch', 'vehicle') }}
-),
-
-renamed as (
-    select
-        vehicle_id,
-        license_plate,
-        vehicle_make,
-        vehicle_model,
-        vehicle_year,
-        vehicle_capacity,
-        vehicle_color,
-        vehicle_type,
-        vehicle_status,
-        verified_at,
-        created_at,
-        updated_at,
-        deleted_at,
-
-        -- derived
-        deleted_at is not null    as is_deleted,
-        vehicle_status = 'ACTIVE' as is_active,
-        concat(
-            vehicle_make, ' ', vehicle_model, ' ', cast(vehicle_year as string)
-        )                         as vehicle_full_name
-
-    from source
-    where vehicle_id is not null
-)
-
-select * from renamed
+with src as (select * from {{ ref('snap_vehicle') }})
+select
+    cast(dbt_scd_id as string) as vehicle_snapshot_id,
+    cast(vehicle_id as int64) as vehicle_id,
+    cast(driver_id as int64) as driver_id,
+    upper(cast(license_plate as string)) as license_plate,
+    upper(cast(vehicle_type as string)) as vehicle_type,
+    cast(vehicle_make as string) as vehicle_make,
+    cast(vehicle_model as string) as vehicle_model,
+    cast(vehicle_year as int64) as vehicle_year,
+    upper(cast(vehicle_status as string)) as vehicle_status,
+    cast(created_at as timestamp) as created_at,
+    cast(updated_at as timestamp) as updated_at,
+    cast(deleted_at as timestamp) as deleted_at,
+    cast(dbt_valid_from as timestamp) as valid_from,
+    cast(dbt_valid_to as timestamp) as valid_to,
+    dbt_valid_to is null as is_current,
+    deleted_at is not null as is_deleted
+from src

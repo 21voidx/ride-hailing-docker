@@ -1,0 +1,77 @@
+version: 2
+
+models:
+  - name: dim_rider
+    columns:
+      - name: rider_sk
+        tests: [not_null, unique]
+      - name: rider_id
+        tests: [not_null]
+
+  - name: dim_driver
+    columns:
+      - name: driver_sk
+        tests: [not_null, unique]
+      - name: driver_id
+        tests: [not_null]
+
+  - name: dim_vehicle
+    columns:
+      - name: vehicle_sk
+        tests: [not_null, unique]
+      - name: vehicle_id
+        tests: [not_null]
+
+  - name: dim_payment_method
+    columns:
+      - name: payment_method_sk
+        tests: [not_null, unique]
+
+  - name: dim_promotion
+    columns:
+      - name: promotion_sk
+        tests: [not_null, unique]
+
+  - name: fct_rides
+    columns:
+      - name: ride_sk
+        tests: [not_null, unique]
+      - name: rider_sk
+        tests:
+          - relationships:
+              to: ref('dim_rider')
+              field: rider_sk
+      - name: driver_sk
+        tests:
+          - relationships:
+              to: ref('dim_driver')
+              field: driver_sk
+              config:
+                where: "driver_sk is not null"
+      - name: vehicle_sk
+        tests:
+          - relationships:
+              to: ref('dim_vehicle')
+              field: vehicle_sk
+              config:
+                where: "vehicle_sk is not null"
+
+  - name: fct_payments
+    columns:
+      - name: payment_transaction_sk
+        tests: [not_null, unique]
+      - name: payment_status
+        tests:
+          - accepted_values:
+              values: ['PAID', 'FAILED']
+
+  - name: agg_daily_city_service
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['metric_date', 'city_code', 'service_type']
+    columns:
+      - name: completion_rate
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1

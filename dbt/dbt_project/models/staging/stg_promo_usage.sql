@@ -1,24 +1,10 @@
--- Staging: Promo Usage
--- Source    : Batch → dev_bronze_pg.promo_usage
--- Strategy  : Append-only. Satu baris per pemakaian promo per ride.
--- Notes     : Timestamps sudah bertipe TIMESTAMP (bukan STRING).
-
-with source as (
-    select * from {{ source('ride_ops_batch', 'promo_usage') }}
-),
-
-renamed as (
-    select
-        promo_usage_id,
-        promotion_id,
-        ride_id,
-        rider_id,
-        discount_amount_applied,
-        used_at,
-        created_at
-
-    from source
-    where promo_usage_id is not null
-)
-
-select * from renamed
+select
+    cast(promo_usage_id as int64) as promo_usage_id,
+    cast(promotion_id as int64) as promotion_id,
+    cast(ride_id as int64) as ride_id,
+    cast(rider_id as int64) as rider_id,
+    cast(discount_amount_applied as numeric) as discount_amount_applied,
+    cast(used_at as timestamp) as used_at,
+    cast(created_at as timestamp) as created_at,
+    cast(updated_at as timestamp) as updated_at
+from {{ source('bronze_mysql', 'promo_usage') }}

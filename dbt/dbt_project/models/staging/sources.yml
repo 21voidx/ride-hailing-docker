@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: bronze_pg
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
+    schema: "{{ env_var('BQ_BRONZE_PG_DATASET', 'raw_ride_pg') }}"
+    tables:
+      - name: rider_account
+      - name: driver_profile
+      - name: vehicle
+      - name: driver_vehicle_assignment
+      - name: driver_shift
+      - name: ride
+      - name: ride_status_history
+      - name: ride_location
+      - name: ride_tracking_point
+      - name: ride_fare
+
+  - name: bronze_mysql
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
+    schema: "{{ env_var('BQ_BRONZE_MYSQL_DATASET', 'raw_ride_mysql') }}"
+    tables:
+      - name: payment_method
+      - name: payment_transaction
+      - name: payment_refund
+      - name: promotion
+      - name: promo_usage
+      - name: review
+      - name: support_ticket

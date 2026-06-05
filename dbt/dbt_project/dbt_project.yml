@@ -1,8 +1,7 @@
-name: 'ride_hailing'
-version: '1.0.0'
+name: ride_hailing
+version: "1.0.0"
 config-version: 2
-
-profile: 'ride_hailing'
+profile: ride_hailing_bigquery
 
 model-paths: ["models"]
 analysis-paths: ["analyses"]
@@ -12,42 +11,29 @@ macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
 target-path: "target"
-clean-targets:
-  - "target"
-  - "dbt_packages"
+clean-targets: ["target", "dbt_packages"]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Variables
-# ─────────────────────────────────────────────────────────────────────────────
 vars:
-  source_project: dbt-taxi-explore
-
-  # Schema names untuk raw bronze layer
-  bronze_cdc_schema: "dev_bronze_cdc_events"   
-  bronze_batch_schema: "dev_bronze_pg"     
-
-  # Partition start untuk query CDC tables (require_partition_filter = TRUE)
-  # Set ke tanggal mulai data terlama yang relevan
-  cdc_partition_start: "2020-01-01"
-  reporting_timezone: "Asia/Jakarta"
-  incremental_lookback_days: 2
+  dbt_date:time_zone: "Asia/Jakarta"
 
 models:
   ride_hailing:
-
+    +persist_docs:
+      relation: true
+      columns: true
     staging:
       +materialized: view
-      +schema: staging
-
+      +schema: "{{ env_var('BQ_STAGING_DATASET', 'stg_ride_hailing') }}"
     intermediate:
       +materialized: ephemeral
-
+      +schema: "{{ env_var('BQ_INTERMEDIATE_DATASET', 'int_ride_hailing') }}"
     marts:
-      dimensions:
+      +schema: "{{ env_var('BQ_MART_DATASET', 'mart_ride_hailing') }}"
+      dim:
         +materialized: table
-        +schema: marts
-
-      facts:
+      fact:
         +materialized: incremental
-        +schema: marts
+        +on_schema_change: sync_all_columns
+      agg:
+        +materialized: incremental
         +on_schema_change: sync_all_columns

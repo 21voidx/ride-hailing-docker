@@ -1,27 +1,12 @@
--- Staging: Ride Status History
--- Source    : Batch → dev_bronze_pg.ride_status_history
--- Strategy  : Append-only. Setiap baris = 1 perubahan status.
---             Tidak perlu deduplication.
--- Notes     : Timestamps sudah bertipe TIMESTAMP (bukan STRING).
-
-with source as (
-    select * from {{ source('ride_ops_batch', 'ride_status_history') }}
-),
-
-renamed as (
-    select
-        ride_status_history_id,
-        ride_id,
-        old_status,
-        new_status,
-        changed_by_user_id,
-        reason_code,
-        reason_note,
-        changed_at,
-        created_at
-
-    from source
-    where ride_status_history_id is not null
-)
-
-select * from renamed
+select
+    cast(ride_status_history_id as int64) as ride_status_history_id,
+    cast(ride_id as int64) as ride_id,
+    upper(cast(old_status as string)) as old_status,
+    upper(cast(new_status as string)) as new_status,
+    upper(cast(changed_by_type as string)) as changed_by_type,
+    cast(changed_by_id as int64) as changed_by_id,
+    upper(cast(reason_code as string)) as reason_code,
+    cast(reason_note as string) as reason_note,
+    cast(changed_at as timestamp) as changed_at,
+    cast(created_at as timestamp) as created_at
+from {{ source('bronze_pg', 'ride_status_history') }}

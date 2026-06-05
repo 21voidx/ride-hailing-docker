@@ -1,14 +1,13 @@
-with src as (select * from {{ ref('snap_driver_profile') }})
+with src as (select * from {{ ref('snap_rider_account') }})
 select
-    cast(dbt_scd_id as string) as driver_snapshot_id,
-    cast(driver_id as int64) as driver_id,
-    cast(driver_name as string) as driver_name,
+    cast(dbt_scd_id as string) as rider_snapshot_id,
+    cast(rider_id as int64) as rider_id,
+    cast(username as string) as username,
+    cast(full_name as string) as full_name,
+    lower(cast(email as string)) as email,
     cast(phone_number as string) as phone_number,
+    upper(cast(account_status as string)) as account_status,
     upper(cast(city_code as string)) as city_code,
-    upper(cast(driver_status as string)) as driver_status,
-    upper(cast(verification_status as string)) as verification_status,
-    cast(rating_avg as numeric) as rating_avg,
-    cast(rating_count as int64) as rating_count,
     cast(created_at as timestamp) as created_at,
     cast(updated_at as timestamp) as updated_at,
     cast(deleted_at as timestamp) as deleted_at,

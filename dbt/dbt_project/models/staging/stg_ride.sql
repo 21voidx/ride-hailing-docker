@@ -1,70 +1,31 @@
--- Staging: Ride
--- Source    : CDC → dev_bronze_cdc_events.ride_events
--- Strategy  : Ambil state terbaru per ride_id (dedup via __lsn DESC)
---             Filter __op = 'd' (deleted records)
--- Notes     : Timestamps dari Debezium disimpan sebagai STRING ISO 8601.
---             Partition filter wajib karena require_partition_filter = TRUE.
-
-with source as (
-    select * from {{ source('ride_ops_cdc', 'ride_events') }}
-    -- Partition filter wajib: cover semua data historis
-    where _PARTITIONTIME >= TIMESTAMP('{{ var("cdc_partition_start", "2020-01-01") }}')
-),
-
--- Ambil 1 event terbaru per ride_id berdasarkan LSN tertinggi
--- Ini merepresentasikan state aktual di source PostgreSQL
-deduplicated as (
-    select *
-    from source
-    qualify row_number() over (
-        partition by ride_id
-        order by __lsn desc, __source_ts_ms desc
-    ) = 1
-),
-
--- Hanya proses record yang tidak di-delete
-active as (
-    select * from deduplicated
-    where __op != 'd'
-),
-
-renamed as (
-    select
-        -- keys
-        ride_id,
-        rider_id,
-        driver_id,
-        vehicle_id,
-        cancelled_by_user_id,
-
-        -- attributes
-        ride_status,
-        service_type,
-        city_code,
-        cancel_reason_code,
-        cancel_reason_note,
-
-        -- measures
-        estimated_distance_km,
-        estimated_duration_min,
-
-        -- timestamps: cast dari STRING (Debezium ISO 8601) ke TIMESTAMP
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', requested_at)  as requested_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', accepted_at)   as accepted_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', arrived_at)    as arrived_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', started_at)    as started_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', completed_at)  as completed_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', cancelled_at)  as cancelled_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', created_at)    as created_at,
-        safe.parse_timestamp('%Y-%m-%dT%H:%M:%E*SZ', updated_at)    as updated_at,
-
-        -- CDC metadata (audit)
-        __op                                                          as _cdc_op,
-        __lsn                                                         as _cdc_lsn,
-        timestamp_millis(__source_ts_ms)                              as _cdc_source_ts
-
-    from active
-    where ride_id is not null
-)
-
-select * from renamed
+select
+    cast(ride_id as int64) as ride_id,
+    cast(rider_id as int64) as rider_id,
+    cast(driver_id as int64) as driver_id,
+    cast(vehicle_id as int64) as vehicle_id,
+    upper(cast(ride_status as string)) as ride_status,
+    upper(cast(service_type as string)) as service_type,
+    upper(cast(city_code as string)) as city_code,
+    cast(requested_at as timestamp) as requested_at,
+    cast(accepted_at as timestamp) as accepted_at,
+    cast(arrived_at as timestamp) as arrived_at,
+    cast(started_at as timestamp) as started_at,
+    cast(completed_at as timestamp) as completed_at,
+    cast(cancelled_at as timestamp) as cancelled_at,
+    upper(cast(cancelled_by_type as string)) as cancelled_by_type,
+    upper(cast(cancel_reason_code as string)) as cancel_reason_code,
+    cast(estimated_distance_km as numeric) as estimated_distance_km,
+    cast(estimated_duration_min as numeric) as estimated_duration_min,
+    cast(created_at as timestamp) as created_at,
+    cast(updated_at as timestamp) as updated_at,
+    cast(deleted_at as timestamp) as deleted_at,
+    date(cast(requested_at as timestamp), 'Asia/Jakarta') as requested_date,
+    extract(hour from cast(requested_at as timestamp) at time zone 'Asia/Jakarta') as requested_hour,
+    extract(dayofweek from date(cast(requested_at as timestamp), 'Asia/Jakarta')) in (1, 7) as is_weekend,
+    extract(hour from cast(requested_at as timestamp) at time zone 'Asia/Jakarta') between 7 and 9
+      or extract(hour from cast(requested_at as timestamp) at time zone 'Asia/Jakarta') between 17 and 20 as is_peak_hour,
+    ride_status = 'COMPLETED' as is_completed,
+    ride_status = 'CANCELLED' as is_cancelled,
+    ride_status = 'PAYMENT_FAILED' as is_payment_failed,
+    deleted_at is not null as is_deleted
+from {{ source('bronze_pg', 'ride') }}

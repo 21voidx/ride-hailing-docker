@@ -1,42 +1,24 @@
--- Staging: Ride Fare
--- Source    : Batch → dev_bronze_pg.ride_fare
--- Strategy  : Append-only (tiap versi kalkulasi fare disimpan).
---             Gunakan fare_type = 'FINAL' di downstream untuk fare aktual.
--- Notes     : Timestamps sudah bertipe TIMESTAMP (bukan STRING).
-
-with source as (
-    select * from {{ source('ride_ops_batch', 'ride_fare') }}
-),
-
-renamed as (
-    select
-        fare_id,
-        ride_id,
-        fare_type,
-        fare_version,
-        currency_code,
-        distance_km,
-        duration_min,
-        base_fare,
-        distance_fare,
-        time_fare,
-        surge_multiplier,
-        surge_amount,
-        discount_amount,
-        tax_amount,
-        platform_fee,
-        driver_earning,
-        total_fare,
-        fare_rule_code,
-        calculated_at,
-        created_at,
-
-        -- derived
-        surge_multiplier > 1 as is_surge,
-        discount_amount  > 0 as has_discount
-
-    from source
-    where fare_id is not null
-)
-
-select * from renamed
+select
+    cast(fare_id as int64) as fare_id,
+    cast(ride_id as int64) as ride_id,
+    upper(cast(fare_type as string)) as fare_type,
+    cast(fare_version as int64) as fare_version,
+    upper(cast(currency_code as string)) as currency_code,
+    cast(distance_km as numeric) as distance_km,
+    cast(duration_min as numeric) as duration_min,
+    cast(base_fare as numeric) as base_fare,
+    cast(distance_fare as numeric) as distance_fare,
+    cast(time_fare as numeric) as time_fare,
+    cast(surge_multiplier as numeric) as surge_multiplier,
+    cast(surge_amount as numeric) as surge_amount,
+    cast(discount_amount as numeric) as discount_amount,
+    cast(tax_amount as numeric) as tax_amount,
+    cast(platform_fee as numeric) as platform_fee,
+    cast(driver_earning as numeric) as driver_earning,
+    cast(total_fare as numeric) as total_fare,
+    upper(cast(fare_rule_code as string)) as fare_rule_code,
+    cast(is_corrected as bool) as is_corrected,
+    cast(calculated_at as timestamp) as calculated_at,
+    cast(created_at as timestamp) as created_at,
+    cast(updated_at as timestamp) as updated_at
+from {{ source('bronze_pg', 'ride_fare') }}

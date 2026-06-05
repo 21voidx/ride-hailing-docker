@@ -8,7 +8,7 @@ from airflow.timetables.interval import CronDataIntervalTimetable
 from airflow.providers.standard.operators.empty import EmptyOperator
 from helpers.refactored_trino_helper_v2 import TableConfig, make_table_task_group
 
-DAG_ID = "ingest_postgres_to_bq_trino"
+DAG_ID = "ingest_postgres_to_bq_trino_weekly"
 TRINO_CONN_ID = "trino_default"
 GCP_CONN_ID = "google_cloud_default"
 TRINO_BQ_CAT = "bigquery"

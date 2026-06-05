@@ -321,7 +321,7 @@ with DAG(
     description="Batch upsert PostgreSQL source tables to BigQuery bronze via Trino.",
     default_args=default_args,
     start_date=pendulum.datetime(2023, 10, 1, tz="Asia/Jakarta"),
-    end_date=pendulum.datetime(2024, 2, 31, tz="Asia/Jakarta"),
+    end_date=pendulum.datetime(2024, 3, 2, tz="Asia/Jakarta"),
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone="Asia/Jakarta"),
     catchup=True,
     max_active_runs=1,

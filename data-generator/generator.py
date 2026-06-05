@@ -18,7 +18,7 @@ JKT = timezone(timedelta(hours=7))
 POSTGRES_DSN = os.getenv("POSTGRES_DSN", "postgresql://postgres:postgres@postgres-ops:5432/ride_ops_pg")
 MYSQL_HOST = os.getenv("MYSQL_HOST", "mysql-billing")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_DB = os.getenv("MYSQL_DB", "billing_growth_db")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "billing_growth_db")
 MYSQL_USER = os.getenv("MYSQL_USER", "ride_user")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "ride_pass")
 
@@ -84,7 +84,7 @@ def pg_conn():
     return psycopg.connect(POSTGRES_DSN)
 
 def my_conn():
-    return pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DB, autocommit=False)
+    return pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, autocommit=False)
 
 def fetch_one_pg(conn, sql, params=None):
     with conn.cursor() as cur:

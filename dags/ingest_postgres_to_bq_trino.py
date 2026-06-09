@@ -28,7 +28,7 @@ from helpers.refactored_trino_helper import TableConfig, make_table_task_group
 # Global config
 # =============================================================================
 
-DAG_ID = "ingest_postgres_to_bq_trino"
+DAG_ID = "ingest_postgres_to_bq_trino_weekly_v3"
 SOURCE_TZ = "Asia/Jakarta"
 
 TRINO_CONN_ID = "trino_default"

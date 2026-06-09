@@ -1,7 +1,7 @@
 name: ride_hailing
 version: "1.0.0"
 config-version: 2
-profile: ride_hailing_bigquery
+profile: ride_hailing
 
 model-paths: ["models"]
 analysis-paths: ["analyses"]
@@ -24,11 +24,14 @@ models:
     staging:
       +materialized: view
       +schema: "{{ env_var('BQ_STAGING_DATASET', 'stg_ride_hailing') }}"
+      +tags: ["staging"]
     intermediate:
       +materialized: ephemeral
       +schema: "{{ env_var('BQ_INTERMEDIATE_DATASET', 'int_ride_hailing') }}"
+      +tags: ["intermediate"]
     marts:
       +schema: "{{ env_var('BQ_MART_DATASET', 'mart_ride_hailing') }}"
+      +tags: ["mart"]
       dim:
         +materialized: table
       fact:
@@ -37,3 +40,8 @@ models:
       agg:
         +materialized: incremental
         +on_schema_change: sync_all_columns
+
+snapshots:
+  ride_hailing:
+    +target_schema: "{{ env_var('BQ_SNAPSHOT_DATASET', 'snapshots_ride_hailing') }}"
+    

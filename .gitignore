@@ -51,6 +51,9 @@ dbt/dbt_project/dbt_packages/
 dbt/dbt_project/logs/
 dbt/dbt_project/target/
 dbt/dbt_project/REVIEW_NOTES.md
+dbt/dbt_project/.dbt/
+dbt/dbt_project/.pytest_cache/
+dbt/dbt_project/package-lock.yml
 
 ride_hailing_batch_project/
 ride_hailing_batch_project_v2/

@@ -398,9 +398,9 @@ with DAG(
     default_args=default_args,
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone=SOURCE_TZ),
     start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Jakarta"),
-    end_date=pendulum.datetime(2024, 1, 21, tz="Asia/Jakarta"),
+    end_date=pendulum.datetime(2024, 3, 31, tz="Asia/Jakarta"),
     catchup=True,
-    max_active_runs=2,
+    max_active_runs=3,
     tags=["postgres", "bigquery", "trino", "ingestion", "multi-table"],
     doc_md=__doc__,
     params={

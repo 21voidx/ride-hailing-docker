@@ -241,7 +241,7 @@ with DAG(
     dag_id=DAG_ID,
     description="Batch upsert MySQL source tables to BigQuery bronze via Trino.",
     default_args=default_args,
-    start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Jakarta"),
+    start_date=pendulum.datetime(2023, 10, 1, tz="Asia/Jakarta"),
     end_date=pendulum.datetime(2024, 1, 21, tz="Asia/Jakarta"),
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone=SOURCE_TZ),
     catchup=True,

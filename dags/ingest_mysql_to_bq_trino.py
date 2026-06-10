@@ -8,7 +8,7 @@ from airflow.timetables.interval import CronDataIntervalTimetable
 from airflow.providers.standard.operators.empty import EmptyOperator
 from helpers.refactored_trino_helper_v2 import TableConfig, make_table_task_group
 
-DAG_ID = "ingest_mysql_to_bq_trino_weekly_v3"
+DAG_ID = "ingest_mysql_to_bq_trino_weekly_v4"
 SOURCE_TZ = "Asia/Jakarta"
 TRINO_CONN_ID = "trino_default"
 GCP_CONN_ID = "google_cloud_default"
@@ -241,7 +241,7 @@ with DAG(
     dag_id=DAG_ID,
     description="Batch upsert MySQL source tables to BigQuery bronze via Trino.",
     default_args=default_args,
-    start_date=pendulum.datetime(2023, 10, 1, tz="Asia/Jakarta"),
+    start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Jakarta"),
     end_date=pendulum.datetime(2024, 1, 21, tz="Asia/Jakarta"),
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone=SOURCE_TZ),
     catchup=True,

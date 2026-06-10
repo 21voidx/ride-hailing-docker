@@ -28,7 +28,7 @@ from helpers.refactored_trino_helper import TableConfig, make_table_task_group
 # Global config
 # =============================================================================
 
-DAG_ID = "ingest_postgres_to_bq_trino_weekly_v5"
+DAG_ID = "ingest_postgres_to_bq_trino_weekly_v6"
 SOURCE_TZ = "Asia/Jakarta"
 
 TRINO_CONN_ID = "trino_default"
@@ -56,7 +56,6 @@ BASE_LABELS: dict[str, str] = {
 # =============================================================================
 
 TABLE_CONFIGS = [
-    # Generated from init_postgres.sql.
 
     TableConfig(
         pg_table        = "rider_account",

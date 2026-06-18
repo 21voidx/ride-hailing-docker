@@ -35,7 +35,7 @@ CLUSTER_NAME = "cluster-3edd-{{ ds_nodash }}"
 
 BUCKET_NAME = "dataproc-test-111"
 
-SCRIPT_BUCKET_PATH = f"gs://{BUCKET_NAME}/scripts"
+SCRIPT_BUCKET_PATH = f"gs://{BUCKET_NAME}"
 
 SCRIPT_NAME_1 = "pyspark_bq_to_gcs_demo.py"
 SCRIPT_NAME_2 = "pts-ark_gcs_to_bq_demo.py"

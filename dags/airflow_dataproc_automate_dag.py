@@ -33,10 +33,8 @@ ZONE = "us-central1-b"
 
 CLUSTER_NAME = "cluster-3edd-{{ ds_nodash }}"
 
-# Bucket untuk Dataproc staging/temp dan script PySpark
 BUCKET_NAME = "dataproc-test-111"
 
-# Lokasi script PySpark di GCS
 SCRIPT_BUCKET_PATH = f"gs://{BUCKET_NAME}/scripts"
 
 SCRIPT_NAME_1 = "pyspark_bq_to_gcs_demo.py"
@@ -44,31 +42,14 @@ SCRIPT_NAME_2 = "pts-ark_gcs_to_bq_demo.py"
 
 
 # =========================================================
-# 2. Dataproc Cluster Configuration
+# 2. Dataproc Single-Node Cluster Configuration
 # =========================================================
-# Konfigurasi ini dibuat manual agar lebih jelas dan sesuai
-# dengan setting cluster kamu di GCP Console.
-#
-# Region      : us-central1
-# Zone        : us-central1-b
-# Image       : 2.3.30-debian12
-# Master      : 1 node
-# Worker      : 0 node
-# Machine     : n4-standard-2
-# Disk type   : hyperdisk-balanced
-# Disk size   : 200GB
-# Autoscaling : Off
-# Metastore   : None
 
 CLUSTER_CONFIG = {
     "config_bucket": BUCKET_NAME,
 
     "gce_cluster_config": {
         "zone_uri": ZONE,
-
-        # Optional but recommended if PySpark needs GCS, BigQuery, etc.
-        # Bisa dihapus kalau environment kamu sudah pakai custom service account
-        # dengan permission yang benar.
         "service_account_scopes": [
             "https://www.googleapis.com/auth/cloud-platform"
         ],
@@ -83,34 +64,30 @@ CLUSTER_CONFIG = {
         },
     },
 
-    # Single-node cluster: 0 workers
-    "worker_config": {
-        "num_instances": 0,
-    },
+    # PENTING:
+    # Untuk single-node Dataproc via API/Airflow,
+    # JANGAN pakai worker_config num_instances=0.
+    # Gunakan property dataproc.allow.zero.workers.
+    #
+    # Jangan tambahkan:
+    # "worker_config": {"num_instances": 0}
+    #
+    # Jangan tambahkan:
+    # "secondary_worker_config": {"num_instances": 0}
 
     "software_config": {
         "image_version": "2.3.30-debian12",
-
-        # Untuk image Dataproc 2.1+, Spark BigQuery connector sudah pre-installed.
-        # Jadi INIT_FILE connectors.sh tidak wajib.
-        #
-        # Kalau nanti kamu ingin force versi connector tertentu, aktifkan metadata
-        # melalui gce_cluster_config["metadata"] atau submit job dengan jar.
         "properties": {
-            # Development tuning: kecilkan shuffle partition agar tidak terlalu berat
+            # Ini yang membuat cluster menjadi single-node.
+            "dataproc:dataproc.allow.zero.workers": "true",
+
+            # Spark tuning untuk development single-node.
             "spark:spark.sql.adaptive.enabled": "true",
             "spark:spark.sql.shuffle.partitions": "8",
-
-            # Optional: supaya dynamic allocation tidak terlalu agresif di single node
             "spark:spark.dynamicAllocation.enabled": "false",
         },
-
-        # Kalau kamu ingin Jupyter di cluster, aktifkan ini:
-        # "optional_components": ["JUPYTER"],
     },
 
-    # Kalau pakai Jupyter / Spark UI via browser, aktifkan Component Gateway.
-    # Aman untuk dev, tapi pastikan IAM/network kamu benar.
     "endpoint_config": {
         "enable_http_port_access": True,
     },
@@ -130,9 +107,6 @@ PYSPARK_JOB_1 = {
     },
     "pyspark_job": {
         "main_python_file_uri": f"{SCRIPT_BUCKET_PATH}/{SCRIPT_NAME_1}",
-
-        # Optional arguments untuk script PySpark kamu
-        # Hapus kalau script tidak butuh args.
         "args": [
             "--project_id", PROJECT_ID,
             "--temp_bucket", BUCKET_NAME,
@@ -150,9 +124,6 @@ PYSPARK_JOB_2 = {
     },
     "pyspark_job": {
         "main_python_file_uri": f"{SCRIPT_BUCKET_PATH}/{SCRIPT_NAME_2}",
-
-        # Optional arguments untuk script PySpark kamu
-        # Hapus kalau script tidak butuh args.
         "args": [
             "--project_id", PROJECT_ID,
             "--temp_bucket", BUCKET_NAME,
@@ -173,9 +144,6 @@ with models.DAG(
     tags=["dataproc", "pyspark", "development"],
 ) as dag:
 
-    # -----------------------------------------------------
-    # Task 1: Create Dataproc Cluster
-    # -----------------------------------------------------
     create_dataproc_cluster = DataprocCreateClusterOperator(
         task_id="create_dataproc_cluster",
         project_id=PROJECT_ID,
@@ -184,10 +152,6 @@ with models.DAG(
         cluster_config=CLUSTER_CONFIG,
     )
 
-    # -----------------------------------------------------
-    # Task 2A: Submit PySpark Job 1
-    # Example: BigQuery -> Transform -> GCS
-    # -----------------------------------------------------
     pyspark_task_bq_to_gcs = DataprocSubmitJobOperator(
         task_id="pyspark_task_bq_to_gcs",
         project_id=PROJECT_ID,
@@ -195,10 +159,6 @@ with models.DAG(
         job=PYSPARK_JOB_1,
     )
 
-    # -----------------------------------------------------
-    # Task 2B: Submit PySpark Job 2
-    # Example: GCS -> Transform -> BigQuery
-    # -----------------------------------------------------
     pyspark_task_gcs_to_bq = DataprocSubmitJobOperator(
         task_id="pyspark_task_gcs_to_bq",
         project_id=PROJECT_ID,
@@ -206,11 +166,6 @@ with models.DAG(
         job=PYSPARK_JOB_2,
     )
 
-    # -----------------------------------------------------
-    # Task 3: Delete Cluster
-    # -----------------------------------------------------
-    # ALL_DONE penting agar cluster tetap dihapus walaupun
-    # salah satu PySpark job gagal.
     delete_dataproc_cluster = DataprocDeleteClusterOperator(
         task_id="delete_dataproc_cluster",
         project_id=PROJECT_ID,
@@ -219,9 +174,6 @@ with models.DAG(
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
-    # -----------------------------------------------------
-    # Task Dependencies
-    # -----------------------------------------------------
     create_dataproc_cluster >> [
         pyspark_task_bq_to_gcs,
         pyspark_task_gcs_to_bq,

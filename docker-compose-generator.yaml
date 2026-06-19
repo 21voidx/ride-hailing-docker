@@ -51,8 +51,6 @@ services:
   data-generator:
     build: ./data-generator
     container_name: data-generator
-    env_file:
-      - .env
     environment:
       POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-ops:5432/${POSTGRES_DB:-ride_ops_pg}
       MYSQL_HOST: mysql-billing
@@ -63,13 +61,14 @@ services:
       TZ: Asia/Jakarta
       GENERATOR_MODE: ${GENERATOR_MODE:-portfolio}
       SIM_START_AT: ${SIM_START_AT:-2024-01-01T00:00:00+07:00}
-      SIM_SECONDS_PER_MINUTE: ${SIM_SECONDS_PER_MINUTE}
-      RIDES_PER_MINUTE: ${RIDES_PER_MINUTE}
-      SEED_RIDERS: ${SEED_RIDERS}
-      SEED_DRIVERS: ${SEED_DRIVERS}
-      SEED_PROMOTIONS: ${SEED_PROMOTIONS}
-      ENABLE_MAINTENANCE_EVENTS: ${ENABLE_MAINTENANCE_EVENTS}
-      LOG_LEVEL: ${LOG_LEVEL}
+      SIM_SECONDS_PER_MINUTE: ${SIM_SECONDS_PER_MINUTE:-0.05}
+      RIDES_PER_MINUTE: ${RIDES_PER_MINUTE:-10}
+      MAX_CONCURRENT_RIDES: ${MAX_CONCURRENT_RIDES:-50}
+      SEED_RIDERS: ${SEED_RIDERS:-5000}
+      SEED_DRIVERS: ${SEED_DRIVERS:-1500}
+      SEED_PROMOTIONS: ${SEED_PROMOTIONS:-30}
+      ENABLE_MAINTENANCE_EVENTS: ${ENABLE_MAINTENANCE_EVENTS:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       postgres-ops:
         condition: service_healthy

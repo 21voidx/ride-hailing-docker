@@ -51,6 +51,8 @@ services:
   data-generator:
     build: ./data-generator
     container_name: data-generator
+    env_file:
+      - .env
     environment:
       POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-ops:5432/${POSTGRES_DB:-ride_ops_pg}
       MYSQL_HOST: mysql-billing

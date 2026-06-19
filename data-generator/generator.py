@@ -24,14 +24,14 @@ MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "ride_pass")
 
 GENERATOR_MODE = os.getenv("GENERATOR_MODE", "portfolio")
 SIM_START_AT = os.getenv("SIM_START_AT", "2024-01-01T00:00:00+07:00")
-SIM_SECONDS_PER_MINUTE = float(os.getenv("SIM_SECONDS_PER_MINUTE", "0.5"))
-RIDES_PER_MINUTE = float(os.getenv("RIDES_PER_MINUTE", "3"))
-MAX_CONCURRENT_RIDES = int(os.getenv("MAX_CONCURRENT_RIDES", "10"))
-SEED_RIDERS = int(os.getenv("SEED_RIDERS", "600"))
-SEED_DRIVERS = int(os.getenv("SEED_DRIVERS", "180"))
-SEED_PROMOTIONS = int(os.getenv("SEED_PROMOTIONS", "12"))
-ENABLE_MAINTENANCE_EVENTS = os.getenv("ENABLE_MAINTENANCE_EVENTS", "true").lower() == "true"
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+SIM_SECONDS_PER_MINUTE = float(os.getenv("SIM_SECONDS_PER_MINUTE"))
+RIDES_PER_MINUTE = float(os.getenv("RIDES_PER_MINUTE"))
+MAX_CONCURRENT_RIDES = int(os.getenv("MAX_CONCURRENT_RIDES"))
+SEED_RIDERS = int(os.getenv("SEED_RIDERS"))
+SEED_DRIVERS = int(os.getenv("SEED_DRIVERS"))
+SEED_PROMOTIONS = int(os.getenv("SEED_PROMOTIONS"))
+ENABLE_MAINTENANCE_EVENTS = os.getenv("ENABLE_MAINTENANCE_EVENTS").lower() == "true"
+LOG_LEVEL = os.getenv("LOG_LEVEL")
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("portfolio-generator")

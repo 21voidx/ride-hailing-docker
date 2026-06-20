@@ -28,7 +28,7 @@ from helpers.refactored_trino_helper import TableConfig, make_table_task_group
 # Global config
 # =============================================================================
 
-DAG_ID = "ingest_postgres_to_bq_trino_weekly_v7"
+DAG_ID = "ingest_postgres_to_bq_trino_weekly_v8"
 SOURCE_TZ = "Asia/Jakarta"
 
 TRINO_CONN_ID = "trino_default"
@@ -397,9 +397,9 @@ with DAG(
     ),
     default_args=default_args,
     schedule=CronDataIntervalTimetable("0 0 * * 0", timezone=SOURCE_TZ),
-    start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Jakarta"),
-    # end_date=pendulum.datetime(2024, 3, 31, tz="Asia/Jakarta"),
-    catchup=False,
+    start_date=pendulum.datetime(2025, 12, 28, tz="Asia/Jakarta"),
+    end_date=pendulum.datetime(2026, 2, 22, tz="Asia/Jakarta"),
+    catchup=True,
     max_active_runs=3,
     tags=["postgres", "bigquery", "trino", "ingestion", "multi-table"],
     doc_md=__doc__,
